@@ -60,6 +60,14 @@ DEDUP_DATABASE_FILE = Path(DEDUP_DATABASE_DIR, f"{_DEDUP_DATABASE_NAME_ENV}.sqli
 
 REQUESTS_CA_BUNDLE = os.getenv("REQUESTS_CA_BUNDLE")
 
+_PDQ_DATABASE_NAME = os.getenv("DEDUP_DATABASE_NAME", "pdq")
+PDQ_DATABASE_FILE = Path(DEDUP_DATABASE_DIR, f"{_PDQ_DATABASE_NAME}.sqlite")
+PDQ_TABLE_NAME = "potential_duplicates_queue"
+
+USE_POTENTIAL_DUPES_QUEUE = True if os.getenv("USE_POTENTIAL_DUPES_QUEUE") else False
+PDQ_FLUSH_COUNT = os.getenv("PDQ_FLUSH_COUNT", 16)
+ONLY_SEND_QUEUED_DUPES = True if os.getenv("ONLY_SEND_QUEUED_DUPES") else False
+
 # Optional query for selecting files to process
 _HYDRUS_QUERY_ENV = os.getenv("HYDRUS_QUERY")
 HYDRUS_QUERY = validate_json_array_env_var(_HYDRUS_QUERY_ENV, err_msg="Ensure HYDRUS_QUERY is a JSON formatted array.")

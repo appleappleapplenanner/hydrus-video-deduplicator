@@ -89,3 +89,7 @@ def database_accessible(db_file: Path | str, tablename: str, verbose: bool = Fal
             print("[red] Could not access database.")
         logging.error(str(exc))
     return False
+
+
+def get_potential_duplicate_count_hydrus(client: Client, file_service_keys: list) -> int:
+    return client.get_potentials_count(file_service_keys=file_service_keys)["potential_duplicates_count"]

@@ -20,7 +20,8 @@ import hydrusvideodeduplicator.hydrus_api as hydrus_api
 import hydrusvideodeduplicator.hydrus_api.utils as hydrus_api_utils
 
 from .config import DEDUP_DATABASE_DIR, DEDUP_DATABASE_FILE
-from .dedup_util import database_accessible
+from .dedup_util import database_accessible, get_potential_duplicate_count_hydrus
+from .pdq import PotentialDuplicatesQueue, Relationship
 from .vpdqpy.vpdqpy import Vpdq
 
 
@@ -28,6 +29,7 @@ class HydrusVideoDeduplicator:
     hydlog = logging.getLogger("hvd")
     hydlog.setLevel(logging.INFO)
     threshold: float = 75.0
+    potential_dupe_queue: PotentialDuplicatesQueue | None = None
     _DEBUG = False
 
     def __init__(
@@ -229,9 +231,6 @@ class HydrusVideoDeduplicator:
             finally:
                 print(f"[green] Added {hash_count} new videos to the database.")
 
-    def get_potential_duplicate_count_hydrus(self) -> int:
-        return self.client.get_potentials_count(file_service_keys=self.file_service_keys)["potential_duplicates_count"]
-
     def compare_videos(self, video1_hash: str, video2_hash: str, video1_phash: str, video2_phash: str) -> None:
         """Compare videos and mark them as potential duplicates in Hydrus if they are similar."""
         vpdq_hash1 = Vpdq.json_to_vpdq(video1_phash)
@@ -245,14 +244,12 @@ class HydrusVideoDeduplicator:
                 # self.hydlog.info(f"Duplicates filenames: {file_names}")
                 self.hydlog.info(f"\"Similar {similarity}%: {video1_hash}\" and \"{video2_hash}\"")
 
-            new_relationship = {
-                "hash_a": str(video1_hash),
-                "hash_b": str(video2_hash),
-                "relationship": int(hydrus_api.DuplicateStatus.POTENTIAL_DUPLICATES),
-                "do_default_content_merge": True,
-            }
+            new_relationship = Relationship(str(video1_hash), str(video2_hash))
 
-            self.client.set_file_relationships([new_relationship])
+            if self.potential_dupe_queue:
+                self.potential_dupe_queue.add(new_relationship)
+            else:
+                self.client.set_file_relationships([new_relationship])
 
     @staticmethod
     def clear_search_cache() -> None:
@@ -278,7 +275,7 @@ class HydrusVideoDeduplicator:
             return
 
         # Number of potential duplicates before adding more. Just for user info.
-        pre_dedupe_count = self.get_potential_duplicate_count_hydrus()
+        pre_dedupe_count = get_potential_duplicate_count_hydrus(self.client, self.file_service_keys)
 
         video_counter = 0
         with SqliteDict(
@@ -291,7 +288,7 @@ class HydrusVideoDeduplicator:
                     dynamic_ncols=True, total=total, desc="Finding duplicates", unit="video", colour="BLUE"
                 ) as pbar:
                     # -1 is all cores, -2 is all cores but one
-                    with Parallel(n_jobs=self.job_count) as parallel:
+                    with Parallel(n_jobs=self.job_count, require='sharedmem') as parallel:
                         for i, video1_hash in enumerate(hashdb):
                             video_counter += 1
                             pbar.update(1)
@@ -331,13 +328,23 @@ class HydrusVideoDeduplicator:
                 row["farthest_search_index"] = total
                 hashdb[video1_hash] = row
 
+        if self.potential_dupe_queue:
+            try:
+                self.potential_dupe_queue.flush_to_client_api()
+            except Exception as e:
+                self.hydlog.debug(e)
+
         # Statistics for user
-        post_dedupe_count = self.get_potential_duplicate_count_hydrus()
-        new_dedupes_count = post_dedupe_count - pre_dedupe_count
-        if new_dedupes_count > 0:
-            print(f"[green] {new_dedupes_count} new potential duplicates marked for processing!")
-        else:
-            print("[green] No new potential duplicates found.")
+        try:
+            post_dedupe_count = get_potential_duplicate_count_hydrus(self.client, self.file_service_keys)
+            new_dedupes_count = post_dedupe_count - pre_dedupe_count
+            if new_dedupes_count > 0:
+                print(f"[green] {new_dedupes_count} new potential duplicates marked for processing!")
+            else:
+                print("[green] No new potential duplicates marked for processing.")
+        except Exception as e:
+            self.hydlog.debug(e)
+            print("[yellow] Could not fetch potential duplicates count to determine # of new potential dupes")
 
     @staticmethod
     def batched(iterable: Iterable, batch_size: int) -> Generator[tuple, Any, None]:

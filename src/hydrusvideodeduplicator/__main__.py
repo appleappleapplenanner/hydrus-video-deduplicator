@@ -7,8 +7,17 @@ from rich import print
 import hydrusvideodeduplicator.hydrus_api as hydrus_api
 
 from .__about__ import __version__
-from .config import HYDRUS_API_KEY, HYDRUS_API_URL, HYDRUS_LOCAL_FILE_SERVICE_KEYS, HYDRUS_QUERY, REQUESTS_CA_BUNDLE
+from .config import (
+    HYDRUS_API_KEY,
+    HYDRUS_API_URL,
+    HYDRUS_LOCAL_FILE_SERVICE_KEYS,
+    HYDRUS_QUERY,
+    REQUESTS_CA_BUNDLE,
+    USE_POTENTIAL_DUPES_QUEUE,
+    ONLY_SEND_QUEUED_DUPES,
+)
 from .dedup import HydrusVideoDeduplicator
+from .pdq import PotentialDuplicatesQueue
 
 """
 Parameters:
@@ -48,7 +57,7 @@ def main(
     debug: Annotated[Optional[bool], typer.Option(hidden=True)] = False,
 ):
     # CLI debug parameter sets log level to info or debug
-    loglevel = logging.WARNING
+    loglevel = logging.INFO
     if debug:
         loglevel = logging.DEBUG
         verbose = True
@@ -135,7 +144,16 @@ def main(
         superdeduper.hydlog.setLevel(logging.DEBUG)
         superdeduper._DEBUG = True
 
-    if threshold < 0:
+    if ONLY_SEND_QUEUED_DUPES:
+        PotentialDuplicatesQueue(hydrus_client, superdeduper.file_service_keys).flush_to_client_api()
+        raise typer.Exit()
+
+    if USE_POTENTIAL_DUPES_QUEUE:
+        potential_dupe_queue = PotentialDuplicatesQueue(hydrus_client, superdeduper.file_service_keys)
+        superdeduper.potential_dupe_queue = potential_dupe_queue
+        print(f"Queueing potential dupes. {potential_dupe_queue.get_pdq_size()} videos loaded from db into the queue")
+
+    if threshold < 0 or threshold > 100:
         print("[red] ERROR: Invalid similarity threshold. Must be between 0 and 100.")
         raise typer.Exit(code=1)
     superdeduper.threshold = threshold
