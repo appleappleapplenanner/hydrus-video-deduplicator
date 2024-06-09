@@ -107,8 +107,8 @@ dependencies = [
 ]
 
 [tool.hatch.envs.lint.scripts]
-format = "black --check src"
-lint = "ruff check src"
+format = "black --check src {args}"
+lint = "ruff check src {args}"
 
 [tool.black]
 target-version = ["py310", "py311"]

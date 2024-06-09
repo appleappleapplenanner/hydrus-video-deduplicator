@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from rich import print
 from sqlitedict import SqliteDict
-from tqdm import tqdm
+import sqlite3
 
 if TYPE_CHECKING:
     from collections.abc import Generator, Iterable
@@ -133,10 +133,15 @@ def clear_trashed_files_from_db(client: HVDClient) -> None:
     """
     Delete trashed and deleted Hydrus files from the database.
     """
-    if not is_db_accessible():
-        return
+    # cur = create_cursor()
+    # res = cur.execute("SELECT name FROM files")
+    # res.fetchone()
 
+    """
     try:
+    if not is_db_accessible():
+         return
+
         with SqliteDict(str(DEDUP_DATABASE_FILE), tablename="videos", flag="c", outer_stack=False) as hashdb:
             # This is EXPENSIVE. sqlitedict gets len by iterating over the entire database!
             if (total := len(hashdb)) < 1:
@@ -171,6 +176,7 @@ def clear_trashed_files_from_db(client: HVDClient) -> None:
 
     except OSError as exc:
         dedupedblog.info(exc)
+    """
 
 
 def create_db_dir() -> None:
@@ -192,3 +198,66 @@ def get_db_file_path() -> Path:
     Return the database file path.
     """
     return DEDUP_DATABASE_FILE
+
+
+_db_connection: sqlite3.Connection
+
+
+def connect_to_db() -> None:
+    DB_PATH = Path("testing.db")
+    if Path.exists(Path(DB_PATH)):
+        print("DB already exists. Wiping.")
+        # Path.unlink(DB_PATH)
+    con = sqlite3.connect(DB_PATH)
+    global _db_connection
+    _db_connection = con
+
+
+def get_connection():
+    return _db_connection
+
+
+def create_cursor():
+    return get_connection().cursor()
+
+
+def create_tables() -> None:
+    cur = create_cursor()
+    # The new files table is analogous to Hydrus client.master.md hashes table.
+    # hash_id is the video id.
+    # This table is the comparable to the old videos table where hash is the key column
+    cur.execute("CREATE TABLE IF NOT EXISTS files(hash_id INTEGER PRIMARY KEY, hash BLOB_BYTES UNIQUE)")
+    cur.execute("CREATE TABLE IF NOT EXISTS phashes(hash_id INTEGER PRIMARY KEY, phash BLOB_BYTES)")
+    cur.execute("CREATE TABLE IF NOT EXISTS deleted_files(hash_id INTEGER PRIMARY KEY)")
+    cur.execute(
+        "CREATE TABLE IF NOT EXISTS farthest_search_cache(hash_id INTEGER PRIMARY KEY, farthest_search_index INTEGER)"
+    )
+
+
+def get_files_count() -> int:
+    """Get the number of files in the DB."""
+    cur = create_cursor()
+    cur.execute("SELECT count(hash_id) FROM files")
+    return cur.fetchone()[0]
+
+
+def get_hash_from_hash_id(hash_id: str) -> str | None:
+    """Get the hash from the hash id. Return None if it's not found."""
+    cur = create_cursor()
+    values = {"hash_id": hash_id}
+    cur.execute("SELECT hash FROM files WHERE hash_id = :hash_id;", values)
+    hash_tup = cur.fetchone()
+    if hash_tup is None or (len(hash_tup) == 0):
+        return None
+    return hash_tup[0]
+
+
+def get_hash_id_from_hash(video_hash: str) -> str | None:
+    """Get the hash_id from the video hash. Return None if it's not found."""
+    cur = create_cursor()
+    values = {"hash": video_hash}
+    cur.execute("SELECT hash_id FROM files WHERE hash = :hash;", values)
+    hash_id_tup = cur.fetchone()
+    if hash_id_tup is None or (len(hash_id_tup) == 0):
+        return None
+    return hash_id_tup[0]

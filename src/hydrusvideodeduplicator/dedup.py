@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 from collections import namedtuple
-from itertools import islice
 from typing import TYPE_CHECKING
 
 from rich import print
@@ -110,29 +109,40 @@ class HydrusVideoDeduplicator:
         and then add it to the database.
         """
 
-        DedupeDB.create_db_dir()
+        cur = DedupeDB.create_cursor()
 
         with SqliteDict(
             str(DedupeDB.get_db_file_path()), tablename="videos", flag="c", autocommit=True, outer_stack=False
         ) as hashdb:
             dbsize = os.path.getsize(DedupeDB.get_db_file_path())
 
-            # Cache len(hashdb) because it's O(n) to get the length.
-            if (dblen := len(hashdb)) > 0:
+            dblen = DedupeDB.get_files_count()
+            if dblen > 0:
+                # TODO: Use the length of phashes, not files since it can be off by 1.
                 self.hydlog.info(f"Database found of length {dblen}, size {dbsize} bytes")
             else:
                 self.hydlog.info(f"Database not found. Creating one at {DedupeDB.get_db_file_path()}")
 
+            new_video_hashes = []
             if overwrite:
                 new_video_hashes = video_hashes
                 print(f"[yellow] Overwriting {dblen} existing hashes.")
             else:
                 # Filter existing hashes
-                new_video_hashes = [
-                    video_hash
-                    for video_hash in video_hashes
-                    if video_hash not in hashdb or "perceptual_hash" not in hashdb[video_hash]
-                ]
+                for video_hash in video_hashes:
+                    # Get the hash_id from the video hash (if it exists).
+                    hash_id = DedupeDB.get_hash_id_from_hash(video_hash)
+                    cur.execute("SELECT hash_id FROM files WHERE hash = :hash;", {"hash": video_hash})
+
+                    # If the file isn't in the files table, then it definitely shouldn't be phashes table.
+                    if hash_id is None:
+                        new_video_hashes.append(video_hash)
+                    else:
+                        cur.execute("SELECT hash_id FROM phashes WHERE hash_id = :hash_id;", {"hash_id": hash_id})
+                        res = cur.fetchone()
+                        # If the file isn't in phashes, then we want to add it.
+                        if res is None or (len(res) == 0):
+                            new_video_hashes.append(video_hash)
 
             print(f"[blue] Found {len(new_video_hashes)} videos to process")
 
@@ -142,11 +152,25 @@ class HydrusVideoDeduplicator:
 
                 with tqdm(total=len(new_video_hashes), dynamic_ncols=True, unit="video", colour="BLUE") as pbar:
                     for video_hash in new_video_hashes:
+                        values = {"hash_id": None, "hash": video_hash}
+                        cur.execute("INSERT OR IGNORE INTO files (hash_id, hash) VALUES (:hash_id, :hash);", values)
+                        # TODO: Should files that don't have a perceptual hash yet done be in this table?
+                        DedupeDB.get_connection().commit()
+
                         result = self.fetch_and_hash_file(video_hash)
                         if result is None:
                             continue
+
+                        # Get the hash_id from the video hash.
+                        values = {"hash": video_hash}
+                        cur.execute("SELECT hash_id FROM files WHERE hash = :hash;", values)
+                        hash_id = cur.fetchone()[0]
+
                         video_hash = result.video_hash
                         perceptual_hash = result.perceptual_hash
+                        values = {"hash_id": hash_id, "phash": perceptual_hash}
+                        cur.execute("INSERT INTO phashes (hash_id, phash) VALUES (:hash_id, :phash);", values)
+
                         row = hashdb.get(video_hash, {})
                         row["perceptual_hash"] = perceptual_hash
                         hashdb[video_hash] = row
@@ -193,64 +217,59 @@ class HydrusVideoDeduplicator:
         self,
     ) -> None:
         """Find potential duplicates in the database and mark them in Hydrus."""
-        if not DedupeDB.is_db_accessible(verbose=True):
-            print("[red] Could not search for duplicates.")
-            return
+        # TODO
+        # if not DedupeDB.is_db_accessible(verbose=True):
+        #     print("[red] Could not search for duplicates.")
+        #     return
 
         # Number of potential duplicates before adding more. Just for user info.
         pre_dedupe_count = self.client.get_potential_duplicate_count_hydrus()
 
         video_counter = 0
-        with SqliteDict(
-            str(DedupeDB.get_db_file_path()), tablename="videos", flag="c", autocommit=True, outer_stack=False
-        ) as hashdb:
-            current_hash = None
-            try:
-                total = len(hashdb)
+        cur = DedupeDB.create_cursor()
+        cur.execute("SELECT count(hash_id) FROM phashes")
+        total_phashes = cur.fetchone()[0]
 
-                with tqdm(
-                    dynamic_ncols=True, total=total, desc="Finding duplicates", unit="video", colour="BLUE"
-                ) as pbar:
-                    # -1 is all cores, -2 is all cores but one
-                    for i, video1_hash in enumerate(hashdb):
-                        current_hash = video1_hash
-                        video_counter += 1
-                        pbar.update(1)
+        current_hash = None
+        try:
 
-                        row = hashdb[video1_hash]
+            with tqdm(
+                dynamic_ncols=True, total=total_phashes, desc="Finding duplicates", unit="video", colour="BLUE"
+            ) as pbar:
 
-                        # Store last furthest searched position in the database for each element
-                        # This way you only have to start searching at that place instead of at i+1 if it exists
-                        farthest_search_index = row.setdefault("farthest_search_index", i + 1)
+                cur.execute("SELECT hash_id, phash FROM phashes ORDER BY hash_id ASC;")
+                while (row := cur.fetchone()) is not None:
+                    hash_id, phash = row
+                    pbar.update(1)
+                    current_hash = DedupeDB.get_hash_from_hash_id(hash_id)
 
-                        assert farthest_search_index <= total
-                        if farthest_search_index == total:
-                            # This file has already been searched for dupes against all other videos in the DB
+                    cur_b = DedupeDB.create_cursor()
+                    cur_b.execute("SELECT hash_id, phash FROM phashes ORDER BY hash_id ASC;")
+                    while (row_b := cur_b.fetchone()) is not None:
+                        hash_id_b, phash_b = row_b
+
+                        # Don't compare to self
+                        if hash_id == hash_id_b:
                             continue
 
-                        for video2_hash in islice(hashdb, row["farthest_search_index"], None):
-                            self.compare_videos(
-                                video1_hash,
-                                video2_hash,
-                                row["perceptual_hash"],
-                                hashdb[video2_hash]["perceptual_hash"],
-                            )
+                        hash_a = DedupeDB.get_hash_from_hash_id(hash_id)
+                        hash_b = DedupeDB.get_hash_from_hash_id(hash_id_b)
 
-                        # Video has now been compared against all other videos for dupes,
-                        # so update farthest_search_index to the current length of the table
-                        row["farthest_search_index"] = total
-                        hashdb[video1_hash] = row
+                        self.compare_videos(hash_a, hash_b, phash, phash_b)
 
-            except KeyboardInterrupt:
-                print("[yellow] Duplicate search was interrupted!")
-            else:
-                # current_hash can be None if Hydrus DB has no files...
-                if current_hash is not None:
-                    # Set the last element farthest_search_index to the end of the
-                    # table since it won't get hashed because of the islice optimization
-                    row = hashdb[current_hash]
-                    row["farthest_search_index"] = total
-                    hashdb[current_hash] = row
+                    video_counter += 1
+
+        except KeyboardInterrupt:
+            print("[yellow] Duplicate search was interrupted!")
+        else:
+            # current_hash can be None if Hydrus DB has no files...
+            if current_hash is not None:
+                # Set the last element farthest_search_index to the end of the
+                # table since it won't get hashed because of the islice optimization
+                pass
+                # row = hashdb[current_hash]
+                # row["farthest_search_index"] = total
+                # hashdb[current_hash] = row
 
         # Statistics for user
         post_dedupe_count = self.client.get_potential_duplicate_count_hydrus()

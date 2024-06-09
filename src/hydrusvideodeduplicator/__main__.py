@@ -67,14 +67,30 @@ def main(
     logging.basicConfig(format=' %(asctime)s - %(name)s: %(message)s', datefmt='%H:%M:%S', level=loglevel)
     logging.info("Starting Hydrus Video Deduplicator")
 
+    DedupeDB.connect_to_db()
+    DedupeDB.create_tables()
+
+    """
+    # TODO
+    dbsize = os.path.getsize(DedupeDB.get_db_file_path())
+
+    dblen = DedupeDB.get_files_count()
+    if dblen > 0:
+        # TODO: Use the length of phashes, not files since it can be off by 1.
+        self.hydlog.info(f"Database found of length {dblen}, size {dbsize} bytes")
+    else:
+        self.hydlog.info(f"Database not found. Creating one at {DedupeDB.get_db_file_path()}")
+    """
+
     # Verbose sets whether logs are shown to the user at all.
     # Logs are separate from printing in this program.
     if not verbose:
         logging.disable()
 
     # Clear cache
-    if clear_search_cache:
-        DedupeDB.clear_search_cache()
+    # TODO: Add back cache.
+    # if clear_search_cache:
+    #    DedupeDB.clear_search_cache()
 
     # CLI overwrites env vars with no default value
     if not api_key:
@@ -154,7 +170,8 @@ def main(
         raise typer.Exit(code=1)
     HydrusVideoDeduplicator.threshold = threshold
 
-    DedupeDB.clear_trashed_files_from_db(hvdclient)
+    # TODO: Add deleted files table.
+    # DedupeDB.clear_trashed_files_from_db(hvdclient)
 
     deduper.deduplicate(
         overwrite=overwrite,
