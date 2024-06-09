@@ -6,7 +6,6 @@ from collections import namedtuple
 from itertools import islice
 from typing import TYPE_CHECKING
 
-from joblib import Parallel, delayed
 from rich import print
 from sqlitedict import SqliteDict
 from tqdm import tqdm
@@ -142,22 +141,18 @@ class HydrusVideoDeduplicator:
                 self.hydlog.info("Starting perceptual hash processing")
 
                 with tqdm(total=len(new_video_hashes), dynamic_ncols=True, unit="video", colour="BLUE") as pbar:
-                    # Change to return_as='unordered_generator' when joblib supports it! (should be soon)
-                    with Parallel(n_jobs=self.job_count, return_as='generator') as parallel:
-                        result_generator = parallel(
-                            delayed(self.fetch_and_hash_file)(video_hash) for video_hash in new_video_hashes
-                        )
-                        for result in result_generator:
-                            if result is None:
-                                continue
-                            video_hash = result.video_hash
-                            perceptual_hash = result.perceptual_hash
-                            row = hashdb.get(video_hash, {})
-                            row["perceptual_hash"] = perceptual_hash
-                            hashdb[video_hash] = row
+                    for video_hash in new_video_hashes:
+                        result = self.fetch_and_hash_file(video_hash)
+                        if result is None:
+                            continue
+                        video_hash = result.video_hash
+                        perceptual_hash = result.perceptual_hash
+                        row = hashdb.get(video_hash, {})
+                        row["perceptual_hash"] = perceptual_hash
+                        hashdb[video_hash] = row
 
-                            hash_count += 1
-                            pbar.update(1)
+                        hash_count += 1
+                        pbar.update(1)
 
             except KeyboardInterrupt:
                 print("[yellow] Perceptual hash processing was interrupted!")
@@ -217,37 +212,34 @@ class HydrusVideoDeduplicator:
                     dynamic_ncols=True, total=total, desc="Finding duplicates", unit="video", colour="BLUE"
                 ) as pbar:
                     # -1 is all cores, -2 is all cores but one
-                    with Parallel(n_jobs=self.job_count) as parallel:
-                        for i, video1_hash in enumerate(hashdb):
-                            current_hash = video1_hash
-                            video_counter += 1
-                            pbar.update(1)
+                    for i, video1_hash in enumerate(hashdb):
+                        current_hash = video1_hash
+                        video_counter += 1
+                        pbar.update(1)
 
-                            row = hashdb[video1_hash]
+                        row = hashdb[video1_hash]
 
-                            # Store last furthest searched position in the database for each element
-                            # This way you only have to start searching at that place instead of at i+1 if it exists
-                            farthest_search_index = row.setdefault("farthest_search_index", i + 1)
+                        # Store last furthest searched position in the database for each element
+                        # This way you only have to start searching at that place instead of at i+1 if it exists
+                        farthest_search_index = row.setdefault("farthest_search_index", i + 1)
 
-                            assert farthest_search_index <= total
-                            if farthest_search_index == total:
-                                # This file has already been searched for dupes against all other videos in the DB
-                                continue
+                        assert farthest_search_index <= total
+                        if farthest_search_index == total:
+                            # This file has already been searched for dupes against all other videos in the DB
+                            continue
 
-                            parallel(
-                                delayed(self.compare_videos)(
-                                    video1_hash,
-                                    video2_hash,
-                                    row["perceptual_hash"],
-                                    hashdb[video2_hash]["perceptual_hash"],
-                                )
-                                for video2_hash in islice(hashdb, row["farthest_search_index"], None)
+                        for video2_hash in islice(hashdb, row["farthest_search_index"], None):
+                            self.compare_videos(
+                                video1_hash,
+                                video2_hash,
+                                row["perceptual_hash"],
+                                hashdb[video2_hash]["perceptual_hash"],
                             )
 
-                            # Video has now been compared against all other videos for dupes,
-                            # so update farthest_search_index to the current length of the table
-                            row["farthest_search_index"] = total
-                            hashdb[video1_hash] = row
+                        # Video has now been compared against all other videos for dupes,
+                        # so update farthest_search_index to the current length of the table
+                        row["farthest_search_index"] = total
+                        hashdb[video1_hash] = row
 
             except KeyboardInterrupt:
                 print("[yellow] Duplicate search was interrupted!")
