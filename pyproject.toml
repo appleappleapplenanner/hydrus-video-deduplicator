@@ -86,6 +86,7 @@ dependencies = [
 
 [tool.hatch.envs.test.scripts]
 all = "python -m pytest tests/test_dedupe.py tests/test_vpdqpy.py {args}"
+vptree = "python -m pytest tests/test_vptree.py {args}"
 
 # Lint environment
 
