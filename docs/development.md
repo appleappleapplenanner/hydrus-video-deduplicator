@@ -38,7 +38,7 @@ Build documentation:
 hatch run docs:build
 ```
 
-Format code:
+Check code formatting (doesn't actually run formatting):
 
 ```sh
 hatch run lint:format
@@ -48,6 +48,12 @@ Lint code:
 
 ```sh
 hatch run lint:lint
+```
+
+Format code:
+
+```sh
+hatch run format:format
 ```
 
 Benchmark vpdq:

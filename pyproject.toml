@@ -82,11 +82,23 @@ gh-deploy = "mkdocs gh-deploy --force --strict --config-file mkdocs-gh-pages.yml
 [tool.hatch.envs.test]
 dependencies = [
     "pytest",
+    "numpy",
 ]
 
 [tool.hatch.envs.test.scripts]
 all = "python -m pytest tests/test_dedupe.py tests/test_vpdqpy.py {args}"
 vptree = "python -m pytest tests/test_vptree.py {args}"
+
+# Format environment
+
+[tool.hatch.envs.format]
+skip-install = true # Don't install dedupe. We just need to format.
+dependencies = [
+  "black",
+]
+
+[tool.hatch.envs.format.scripts]
+format = "black src"
 
 # Lint environment
 

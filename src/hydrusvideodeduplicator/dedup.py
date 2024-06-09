@@ -181,14 +181,18 @@ class HydrusVideoDeduplicator:
                 # self.hydlog.info(f"Duplicates filenames: {file_names}")
                 self.hydlog.info(f"\"Similar {similarity}%: {video1_hash}\" and \"{video2_hash}\"")
 
-            new_relationship = {
-                "hash_a": str(video1_hash),
-                "hash_b": str(video2_hash),
-                "relationship": int(hydrus_api.DuplicateStatus.POTENTIAL_DUPLICATES),
-                "do_default_content_merge": True,
-            }
+            self.mark_videos_as_duplicates(video1_hash, video2_hash)
 
-            self.client.client.set_file_relationships([new_relationship])
+    def mark_videos_as_duplicates(self, video1_hash: str, video2_hash: str):
+        """Mark a pair of videos as duplicates in Hydrus."""
+        new_relationship = {
+            "hash_a": video1_hash,
+            "hash_b": video2_hash,
+            "relationship": int(hydrus_api.DuplicateStatus.POTENTIAL_DUPLICATES),
+            "do_default_content_merge": True,
+        }
+
+        self.client.client.set_file_relationships([new_relationship])
 
     def _find_potential_duplicates(
         self,
@@ -209,42 +213,105 @@ class HydrusVideoDeduplicator:
             try:
                 total = len(hashdb)
 
+                somewhat_similar_videos = list()
+                from hydrusvideodeduplicator.vptree.vptree import VPTree
+                distance_fn = lambda x, y: (100 - get_phash_similarity(decode_phash_from_str(hashdb[x]["perceptual_hash"]), decode_phash_from_str(hashdb[y]["perceptual_hash"])))
+                with tqdm(
+                    dynamic_ncols=True, total=total, desc="Finding ", unit="video", colour="BLUE"
+                ) as pbar:
+                    for i, video1_hash in enumerate(hashdb):
+                        current_hash = video1_hash
+                        video_counter += 1
+                        pbar.update(1)
+
+                        # row = hashdb[video1_hash]
+                        # hash_a = decode_phash_from_str(row["perceptual_hash"])
+                        # all_hashes.append(video1_hash)
+                print("Building VPTree...")
+                vptree = VPTree([video_hash for video_hash in hashdb], distance_fn)
+                    
                 with tqdm(
                     dynamic_ncols=True, total=total, desc="Finding duplicates", unit="video", colour="BLUE"
                 ) as pbar:
-                    # -1 is all cores, -2 is all cores but one
-                    with Parallel(n_jobs=self.job_count) as parallel:
-                        for i, video1_hash in enumerate(hashdb):
-                            current_hash = video1_hash
-                            video_counter += 1
-                            pbar.update(1)
+                    for i, video1_hash in enumerate(hashdb):
+                        pbar.update(1)
+                        # row = hashdb[video1_hash]
+                        # hash_a = decode_phash_from_str(row["perceptual_hash"])
+                        similar_videos = vptree.get_all_in_range(video1_hash, 10)
+                        if len(similar_videos) > 1:
+                            somewhat_similar_videos.append(similar_videos)
+                            for x in similar_videos:
+                                similar_video = x[1]
+                                if similar_video == video1_hash:
+                                    continue
+                                self.mark_videos_as_duplicates(video1_hash, similar_video)
 
-                            row = hashdb[video1_hash]
+                print(somewhat_similar_videos)
+                """
+                    # Build VPTree
+                    for i, video1_hash in enumerate(hashdb):
+                        current_hash = video1_hash
+                        video_counter += 1
 
-                            # Store last furthest searched position in the database for each element
-                            # This way you only have to start searching at that place instead of at i+1 if it exists
-                            farthest_search_index = row.setdefault("farthest_search_index", i + 1)
+                        row = hashdb[video1_hash]
+                        hash_a = row["perceptual_hash"]
 
-                            assert farthest_search_index <= total
-                            if farthest_search_index == total:
-                                # This file has already been searched for dupes against all other videos in the DB
-                                continue
+                        # Store last furthest searched position in the database for each element
+                        # This way you only have to start searching at that place instead of at i+1 if it exists
+                        farthest_search_index = row.setdefault("farthest_search_index", i + 1)
 
-                            parallel(
-                                delayed(self.compare_videos)(
-                                    video1_hash,
-                                    video2_hash,
-                                    row["perceptual_hash"],
-                                    hashdb[video2_hash]["perceptual_hash"],
-                                )
-                                for video2_hash in islice(hashdb, row["farthest_search_index"], None)
+                        for video2_hash in islice(hashdb, row["farthest_search_index"], None):
+                            hash_b = hashdb[video2_hash]["perceptual_hash"]
+                            phash_a = decode_phash_from_str(hash_a)
+                            phash_b = decode_phash_from_str(hash_b)
+                            similarity = get_phash_similarity(phash_a, phash_b)
+                            if similarity != 0:
+                                somewhat_similar_videos.append((video1_hash, video2_hash))
+                                print(similarity)
+
+                        # Video has now been compared against all other videos for dupes,
+                        # so update farthest_search_index to the current length of the table
+                        row["farthest_search_index"] = total
+                        hashdb[video1_hash] = row
+                print(somewhat_similar_videos)
+                """
+
+
+
+                """
+                # -1 is all cores, -2 is all cores but one
+                with Parallel(n_jobs=self.job_count) as parallel:
+                    for i, video1_hash in enumerate(hashdb):
+                        current_hash = video1_hash
+                        video_counter += 1
+                        pbar.update(1)
+
+                        row = hashdb[video1_hash]
+
+                        # Store last furthest searched position in the database for each element
+                        # This way you only have to start searching at that place instead of at i+1 if it exists
+                        farthest_search_index = row.setdefault("farthest_search_index", i + 1)
+
+                        assert farthest_search_index <= total
+                        if farthest_search_index == total:
+                            # This file has already been searched for dupes against all other videos in the DB
+                            continue
+
+                        parallel(
+                            delayed(self.compare_videos)(
+                                video1_hash,
+                                video2_hash,
+                                row["perceptual_hash"],
+                                hashdb[video2_hash]["perceptual_hash"],
                             )
+                            for video2_hash in islice(hashdb, row["farthest_search_index"], None)
+                        )
 
-                            # Video has now been compared against all other videos for dupes,
-                            # so update farthest_search_index to the current length of the table
-                            row["farthest_search_index"] = total
-                            hashdb[video1_hash] = row
-
+                        # Video has now been compared against all other videos for dupes,
+                        # so update farthest_search_index to the current length of the table
+                        row["farthest_search_index"] = total
+                        hashdb[video1_hash] = row
+                """
             except KeyboardInterrupt:
                 print("[yellow] Duplicate search was interrupted!")
             else:
