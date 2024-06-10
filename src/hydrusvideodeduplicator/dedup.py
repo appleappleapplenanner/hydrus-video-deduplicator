@@ -120,18 +120,18 @@ class HydrusVideoDeduplicator:
             for video_hash in video_hashes:
                 # Get the hash_id from the video hash (if it exists).
                 hash_id = DedupeDB.get_hash_id_from_hash(video_hash)
-                # If the file isn't in files, then we want to hash it, because it won't be in phashes either.
+                # If the file isn't in files, then we want to hash it, because it won't be in perceptual_hashes either.
                 if not hash_id:
                     new_video_hashes.append(video_hash)
                 else:
                     res = cur.execute(
                         """
-                        SELECT hash_id FROM phashes
+                        SELECT hash_id FROM perceptual_hashes
                         WHERE hash_id = :hash_id;
                         """,
                         {"hash_id": hash_id},
                     ).fetchone()
-                    # If the file isn't in phashes, then we want to hash it.
+                    # If the file isn't in perceptual_hashes, then we want to hash it.
                     if res is None or (len(res) == 0):
                         new_video_hashes.append(video_hash)
 
@@ -161,7 +161,7 @@ class HydrusVideoDeduplicator:
 
                         # Insert hash and perceptual hash into the hpash table.
                         cur.execute(
-                            "INSERT INTO phashes (hash_id, phash) VALUES (:hash_id, :phash);",
+                            "INSERT INTO perceptual_hashes (hash_id, phash) VALUES (:hash_id, :phash);",
                             {"hash_id": hash_id, "phash": perceptual_hash},
                         )
 
@@ -214,19 +214,23 @@ class HydrusVideoDeduplicator:
         cur = DedupeDB.create_cursor()
         cur.execute(
             """
-            SELECT count(hash_id) FROM phashes
+            SELECT count(hash_id) FROM perceptual_hashes
             WHERE hash_id NOT IN deleted_files
             """
         )
-        total_phashes = cur.fetchone()[0]
+        total_perceptual_hashes = cur.fetchone()[0]
 
         try:
             with tqdm(
-                dynamic_ncols=True, total=total_phashes, desc="Finding duplicates", unit="video", colour="BLUE"
+                dynamic_ncols=True,
+                total=total_perceptual_hashes,
+                desc="Finding duplicates",
+                unit="video",
+                colour="BLUE",
             ) as pbar:
                 cur.execute(
                     """
-                    SELECT hash_id, phash FROM phashes
+                    SELECT hash_id, phash FROM perceptual_hashes
                     WHERE hash_id NOT IN deleted_files
                     ORDER BY hash_id ASC;
                     """
@@ -239,7 +243,7 @@ class HydrusVideoDeduplicator:
                     # Avoid O(n^2) comparisons. Just compare to the ones not already compared to.
                     cur_b.execute(
                         """
-                        SELECT hash_id, phash FROM phashes
+                        SELECT hash_id, phash FROM perceptual_hashes
                         WHERE hash_id > :hash_id AND hash_id NOT IN deleted_files
                         ORDER BY hash_id ASC;
                         """,

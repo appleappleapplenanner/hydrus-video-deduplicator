@@ -225,7 +225,7 @@ def create_tables() -> None:
     # hash_id is the video id.
     # This table is the comparable to the old videos table where hash is the key column
     cur.execute("CREATE TABLE IF NOT EXISTS files(hash_id INTEGER PRIMARY KEY, hash BLOB_BYTES UNIQUE)")
-    cur.execute("CREATE TABLE IF NOT EXISTS phashes(hash_id INTEGER PRIMARY KEY, phash BLOB_BYTES)")
+    cur.execute("CREATE TABLE IF NOT EXISTS perceptual_hashes(hash_id INTEGER PRIMARY KEY, phash BLOB_BYTES)")
     cur.execute("CREATE TABLE IF NOT EXISTS deleted_files(hash_id INTEGER PRIMARY KEY)")
     cur.execute("CREATE TABLE IF NOT EXISTS version(version TEXT)")
 
