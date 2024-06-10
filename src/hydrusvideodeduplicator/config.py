@@ -55,8 +55,9 @@ _DEDUP_DATABASE_DIR_ENV = PlatformDirs("hydrusvideodeduplicator").user_data_dir
 _DEDUP_DATABASE_DIR_ENV = os.getenv("DEDUP_DATABASE_DIR", _DEDUP_DATABASE_DIR_ENV)
 DEDUP_DATABASE_DIR = Path(_DEDUP_DATABASE_DIR_ENV)
 
-_DEDUP_DATABASE_NAME_ENV = os.getenv("DEDUP_DATABASE_NAME", "videohashes")
-DEDUP_DATABASE_FILE = Path(DEDUP_DATABASE_DIR, f"{_DEDUP_DATABASE_NAME_ENV}.sqlite")
+if os.getenv("DEDUP_DATABASE_NAME") is not None:
+    print("Configuring the database filename through the DEDUP_DATABASE_NAME environment variable was removed.")
+DEDUP_DATABASE_FILE = Path(DEDUP_DATABASE_DIR, "videohashes.sqlite")
 
 REQUESTS_CA_BUNDLE = os.getenv("REQUESTS_CA_BUNDLE")
 

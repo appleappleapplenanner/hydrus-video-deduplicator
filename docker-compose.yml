@@ -12,7 +12,7 @@ services:
     # API_URL: https://localhost:45869 # Optional, default is Docker host
     # HYDRUS_QUERY: '["system:limit is 2", "character:edward"]' # Optional, JSON array of search parameters
     # VERBOSE: 'true'
-    # See full list of options on the wiki
+    # See full list of options in documentation.
 
     # If default API_URL does not connect to Hydrus on Docker host,
     # try using host network mode and set API_URL to https://localhost:45869
