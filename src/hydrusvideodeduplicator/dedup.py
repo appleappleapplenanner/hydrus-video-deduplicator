@@ -148,7 +148,6 @@ class HydrusVideoDeduplicator:
                         values = {"hash_id": None, "hash": video_hash}
                         cur.execute("INSERT OR IGNORE INTO files (hash_id, hash) VALUES (:hash_id, :hash);", values)
                         # TODO: Should files that don't have a perceptual hash yet done be in this table?
-                        DedupeDB.get_connection().commit()
 
                         result = self.fetch_and_hash_file(video_hash)
                         if result is None:
@@ -170,6 +169,7 @@ class HydrusVideoDeduplicator:
                 print("[green] Finished perceptual hash processing.")
 
             finally:
+                DedupeDB.get_connection().commit()
                 print(f"[green] Added {hash_count} new videos to the database.")
 
     def compare_videos(self, video1_hash: str, video2_hash: str, video1_phash: str, video2_phash: str) -> None:
@@ -210,7 +210,6 @@ class HydrusVideoDeduplicator:
         # Number of potential duplicates before adding more. Just for user info.
         pre_dedupe_count = self.client.get_potential_duplicate_count_hydrus()
 
-        video_counter = 0
         cur = DedupeDB.create_cursor()
         cur.execute("SELECT count(hash_id) FROM phashes")
         total_phashes = cur.fetchone()[0]
@@ -232,11 +231,12 @@ class HydrusVideoDeduplicator:
 
                     cur_b = DedupeDB.create_cursor()
                     cur_b.execute(
-                        f"""
-                        SELECT hash_id, phash FROM phashes
-                        WHERE hash_id > {farthest_search_index}
-                        ORDER BY hash_id ASC;
                         """
+                        SELECT hash_id, phash FROM phashes
+                        WHERE hash_id > :farthest_search_index
+                        ORDER BY hash_id ASC;
+                        """,
+                        {"farthest_search_index": farthest_search_index}
                     )
                     while (row_b := cur_b.fetchone()) is not None:
                         hash_id_b, phash_b = row_b
@@ -260,7 +260,6 @@ class HydrusVideoDeduplicator:
                         # TODO: Should this be committed less frequently?
                         DedupeDB.get_connection().commit()
 
-                    video_counter += 1
 
         except KeyboardInterrupt:
             print("[yellow] Duplicate search was interrupted!")

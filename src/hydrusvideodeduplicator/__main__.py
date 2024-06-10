@@ -82,16 +82,16 @@ def main(
     else:
         self.hydlog.info(f"Database not found. Creating one at {DedupeDB.get_db_file_path()}")
     """
-
+        
     # Verbose sets whether logs are shown to the user at all.
     # Logs are separate from printing in this program.
     if not verbose:
         logging.disable()
 
-    # Clear cache
-    # TODO: Add back cache.
-    # if clear_search_cache:
-    #    DedupeDB.clear_search_cache()
+    # Clear farthest search index cache
+    if clear_search_cache:
+        DedupeDB.clear_search_cache()
+        print("[green] Cleared search cache.")
 
     # CLI overwrites env vars with no default value
     if not api_key:

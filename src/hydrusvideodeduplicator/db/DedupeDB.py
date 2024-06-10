@@ -51,18 +51,9 @@ def is_db_accessible(verbose: bool = False) -> bool:
 
 
 def clear_search_cache() -> None:
-    """Delete cache search index value for each video in database"""
-    if not is_db_accessible():
-        return
-
-    with SqliteDict(str(DEDUP_DATABASE_FILE), tablename="videos", flag="c") as hashdb:
-        for key in hashdb:
-            row = hashdb[key]
-            if "farthest_search_index" in row:
-                del row["farthest_search_index"]
-                hashdb[key] = row
-                hashdb.commit()
-    print("[green] Cleared search cache.")
+    """Delete the farthest search cache index for all videos."""
+    cur = create_cursor()
+    cur.execute("DELETE FROM farthest_search_cache;")
 
 
 def update_search_cache(new_total: int | None = None) -> None:
@@ -238,10 +229,14 @@ def create_tables() -> None:
 def set_version(version: str) -> None:
     """Set the version in the database."""
     cur = create_cursor()
-    cur.execute("DROP TABLE IF EXISTS version")
-    cur.execute("CREATE TABLE version(version TEXT)")
+    cur.execute("DELETE FROM version")
     cur.execute("INSERT INTO version (version) VALUES (:version)", {"version": version})
 
+def get_row_count(table: str) -> int:
+    """Get the number of rows in a table."""
+    cur = create_cursor()
+    cur.execute("SELECT count(*) FROM :table", {"table": table})
+    return cur.fetchone()[0]
 
 def get_files_count() -> int:
     """Get the number of files in the DB."""
