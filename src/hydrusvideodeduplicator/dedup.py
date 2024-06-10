@@ -215,7 +215,6 @@ class HydrusVideoDeduplicator:
         cur.execute("SELECT count(hash_id) FROM phashes")
         total_phashes = cur.fetchone()[0]
 
-        current_hash: str
         try:
 
             with tqdm(
@@ -226,35 +225,45 @@ class HydrusVideoDeduplicator:
                 while (row := cur.fetchone()) is not None:
                     hash_id, phash = row
                     pbar.update(1)
-                    current_hash = DedupeDB.get_hash_from_hash_id(hash_id)
+
+                    farthest_search_index = DedupeDB.get_farthest_search_cache_index(hash_id)
+                    if farthest_search_index is None:
+                        farthest_search_index = 0
 
                     cur_b = DedupeDB.create_cursor()
-                    cur_b.execute("SELECT hash_id, phash FROM phashes ORDER BY hash_id ASC;")
+                    cur_b.execute(
+                        f"""
+                        SELECT hash_id, phash FROM phashes
+                        WHERE hash_id > {farthest_search_index}
+                        ORDER BY hash_id ASC;
+                        """
+                    )
                     while (row_b := cur_b.fetchone()) is not None:
                         hash_id_b, phash_b = row_b
 
                         # Don't compare to self
-                        if hash_id == hash_id_b:
-                            continue
+                        if hash_id != hash_id_b:
+                            hash_a = DedupeDB.get_hash_from_hash_id(hash_id)
+                            hash_b = DedupeDB.get_hash_from_hash_id(hash_id_b)
 
-                        hash_a = DedupeDB.get_hash_from_hash_id(hash_id)
-                        hash_b = DedupeDB.get_hash_from_hash_id(hash_id_b)
+                            self.compare_videos(hash_a, hash_b, phash, phash_b)
 
-                        self.compare_videos(hash_a, hash_b, phash, phash_b)
+                        update_farthest_search_cache_cur = DedupeDB.create_cursor()
+                        update_farthest_search_cache_cur.execute(
+                            """
+                            INSERT INTO farthest_search_cache (hash_id, farthest_search_index)
+                            VALUES (:hash_id, :farthest_search_index)
+                            ON CONFLICT (hash_id) DO UPDATE SET farthest_search_index=:farthest_search_index;
+                            """,
+                            {"hash_id": hash_id, "farthest_search_index": hash_id_b},
+                        )
+                        # TODO: Should this be committed less frequently?
+                        DedupeDB.get_connection().commit()
 
                     video_counter += 1
 
         except KeyboardInterrupt:
             print("[yellow] Duplicate search was interrupted!")
-        else:
-            # current_hash can be None if Hydrus DB has no files...
-            if current_hash:
-                # Set the last element farthest_search_index to the end of the
-                # table since it won't get hashed because of the islice optimization
-                pass
-                # row = hashdb[current_hash]
-                # row["farthest_search_index"] = total
-                # hashdb[current_hash] = row
 
         # Statistics for user
         post_dedupe_count = self.client.get_potential_duplicate_count_hydrus()

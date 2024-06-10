@@ -241,23 +241,33 @@ def get_files_count() -> int:
     return cur.fetchone()[0]
 
 
-def get_hash_from_hash_id(hash_id: str) -> str | None:
+def get_hash_from_hash_id(hash_id: int) -> int | None:
     """Get the hash from the hash id. Return None if it's not found."""
     cur = create_cursor()
-    values = {"hash_id": hash_id}
-    cur.execute("SELECT hash FROM files WHERE hash_id = :hash_id;", values)
-    hash_tup = cur.fetchone()
-    if hash_tup is None or (len(hash_tup) == 0):
+    cur.execute("SELECT hash FROM files WHERE hash_id = :hash_id;", {"hash_id": hash_id})
+    res = cur.fetchone()
+    if res is None or (len(res) == 0):
         return None
-    return hash_tup[0]
+    return res[0]
 
 
 def get_hash_id_from_hash(video_hash: str) -> str | None:
     """Get the hash_id from the video hash. Return None if it's not found."""
     cur = create_cursor()
-    values = {"hash": video_hash}
-    cur.execute("SELECT hash_id FROM files WHERE hash = :hash;", values)
-    hash_id_tup = cur.fetchone()
-    if hash_id_tup is None or (len(hash_id_tup) == 0):
+    cur.execute("SELECT hash_id FROM files WHERE hash = :hash;", {"hash": video_hash})
+    res = cur.fetchone()
+    if res is None or (len(res) == 0):
         return None
-    return hash_id_tup[0]
+    return res[0]
+
+
+def get_farthest_search_cache_index(hash_id: int) -> int | None:
+    """Get the farthest search cache index for a file. Return None if it's not found."""
+    cur = create_cursor()
+    cur.execute(
+        "SELECT farthest_search_index FROM farthest_search_cache WHERE hash_id = :hash_id;", {"hash_id": hash_id}
+    )
+    res = cur.fetchone()
+    if res is None or (len(res) == 0):
+        return None
+    return res[0]
