@@ -48,9 +48,7 @@ def main(
     verify_cert: Annotated[
         Optional[str], typer.Option(help="Path to TLS cert. This forces verification.")
     ] = REQUESTS_CA_BUNDLE,
-    clear_search_cache: Annotated[
-        Optional[bool], typer.Option(help="Clear the cache that tracks what files have already been compared")
-    ] = False,
+    clear_search_cache: Annotated[Optional[bool], typer.Option(help="DEPRECATED. Does nothing.")] = False,
     job_count: Annotated[Optional[int], typer.Option(help="Number of CPUs to use. Default is all but one core.")] = -2,
     verbose: Annotated[Optional[bool], typer.Option(help="Verbose logging")] = False,
     debug: Annotated[Optional[bool], typer.Option(hidden=True)] = False,
@@ -82,16 +80,11 @@ def main(
     else:
         self.hydlog.info(f"Database not found. Creating one at {DedupeDB.get_db_file_path()}")
     """
-        
+
     # Verbose sets whether logs are shown to the user at all.
     # Logs are separate from printing in this program.
     if not verbose:
         logging.disable()
-
-    # Clear farthest search index cache
-    if clear_search_cache:
-        DedupeDB.clear_search_cache()
-        print("[green] Cleared search cache.")
 
     # CLI overwrites env vars with no default value
     if not api_key:
@@ -171,8 +164,7 @@ def main(
         raise typer.Exit(code=1)
     HydrusVideoDeduplicator.threshold = threshold
 
-    # TODO: Add deleted files table.
-    # DedupeDB.clear_trashed_files_from_db(hvdclient)
+    DedupeDB.add_trashed_files_to_db(hvdclient)
 
     deduper.deduplicate(
         overwrite=overwrite,

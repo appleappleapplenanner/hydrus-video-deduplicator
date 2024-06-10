@@ -6,6 +6,7 @@ from itertools import islice
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from tqdm import tqdm
 from rich import print
 from sqlitedict import SqliteDict
 import sqlite3
@@ -48,12 +49,6 @@ def is_db_accessible(verbose: bool = False) -> bool:
     Return DB exists and is accessible.
     """
     return database_accessible(get_db_file_path(), tablename="videos", verbose=verbose)
-
-
-def clear_search_cache() -> None:
-    """Delete the farthest search cache index for all videos."""
-    cur = create_cursor()
-    cur.execute("DELETE FROM farthest_search_cache;")
 
 
 def update_search_cache(new_total: int | None = None) -> None:
@@ -120,54 +115,66 @@ def are_files_deleted_hydrus(client: HVDClient, file_hashes: FileHashes) -> dict
     return result
 
 
-def clear_trashed_files_from_db(client: HVDClient) -> None:
+def add_trashed_files_to_db(client: HVDClient) -> None:
     """
-    Delete trashed and deleted Hydrus files from the database.
+    Get trashed files and mark them as trashed in the database.
     """
-    # cur = create_cursor()
-    # res = cur.execute("SELECT name FROM files")
-    # res.fetchone()
+    cur = create_cursor()
+    file_count = get_files_count()
+    print(f"[blue] Database found with {file_count} videos already hashed.")
+    delete_count = 0
+    undelete_count = 0
+    with tqdm(
+        dynamic_ncols=True,
+        total=file_count,
+        desc="Searching for trashed videos",
+        unit="video",
+        colour="BLUE",
+    ) as pbar:
+        # Check if known files are deleted in Hydrus. If they are, mark them as deleted in the db.
+        cur.execute("SELECT hash FROM files")
+        while (row := cur.fetchone()) is not None:
+            video_hash = row[0]
+            # TODO: Batch requests for efficiency.
+            is_trashed_res = are_files_deleted_hydrus(client, [video_hash])
+            # This statement is a bit contrived but we want to make sure the result is actually a bool
+            is_trashed_in_hydrus = True if is_trashed_res[video_hash] is True else False
 
-    """
-    try:
-    if not is_db_accessible():
-         return
+            trash_cur = create_cursor()
+            hash_id = get_hash_id_from_hash(video_hash)
+            # If the file is trashed in hydrus, add it to the trashed table.
+            # If its not, delete it from the trashed table.
+            res = trash_cur.execute(
+                "SELECT hash_id FROM deleted_files WHERE hash_id = :hash_id;", {"hash_id": hash_id}
+            ).fetchone()
+            is_already_trashed = res is not None and len(res) == 1
+            if is_trashed_in_hydrus:
+                if not is_already_trashed:
+                    trash_cur.execute(
+                        """
+                        INSERT INTO deleted_files (hash_id) VALUES (:hash_id)
+                        """,
+                        {"hash_id": hash_id},
+                    )
+                    delete_count += 1
+            else:
+                if is_already_trashed:
+                    trash_cur.execute(
+                        """
+                        DELETE FROM deleted_files WHERE hash_id=:hash_id
+                        """,
+                        {"hash_id": hash_id},
+                    )
+                    undelete_count += 1
 
-        with SqliteDict(str(DEDUP_DATABASE_FILE), tablename="videos", flag="c", outer_stack=False) as hashdb:
-            # This is EXPENSIVE. sqlitedict gets len by iterating over the entire database!
-            if (total := len(hashdb)) < 1:
-                return
+            pbar.update(1)
 
-            delete_count = 0
-            print(f"[blue] Database found with {total} videos already hashed.")
-            try:
-                with tqdm(
-                    dynamic_ncols=True,
-                    total=total,
-                    desc="Searching for trashed videos",
-                    unit="video",
-                    colour="BLUE",
-                ) as pbar:
-                    BATCH_SIZE = 32
-                    for batched_items in batched_and_save_db(hashdb, BATCH_SIZE):
-                        is_trashed_result = are_files_deleted_hydrus(client, batched_items.keys())
-                        for video_hash, is_trashed in is_trashed_result.items():
-                            if is_trashed is True:
-                                del hashdb[video_hash]
-                                delete_count += 1
-                        pbar.update(min(BATCH_SIZE, total - pbar.n))
-            except Exception as exc:
-                print("[red] Failed to clear trashed videos cache.")
-                print(exc)
-                dedupedblog.error(exc)
-            finally:
-                if delete_count > 0:
-                    print(f"Cleared {delete_count} trashed videos from the database.")
-                update_search_cache(total - delete_count)
+        get_connection().commit()
 
-    except OSError as exc:
-        dedupedblog.info(exc)
-    """
+    if delete_count > 0:
+        print(f"Marked {delete_count} deleted videos as trashed.")
+    if undelete_count > 0:
+        print(f"Marked {undelete_count} undeleted videos as not trashed.")
 
 
 def create_db_dir() -> None:
@@ -220,9 +227,6 @@ def create_tables() -> None:
     cur.execute("CREATE TABLE IF NOT EXISTS files(hash_id INTEGER PRIMARY KEY, hash BLOB_BYTES UNIQUE)")
     cur.execute("CREATE TABLE IF NOT EXISTS phashes(hash_id INTEGER PRIMARY KEY, phash BLOB_BYTES)")
     cur.execute("CREATE TABLE IF NOT EXISTS deleted_files(hash_id INTEGER PRIMARY KEY)")
-    cur.execute(
-        "CREATE TABLE IF NOT EXISTS farthest_search_cache(hash_id INTEGER PRIMARY KEY, farthest_search_index INTEGER)"
-    )
     cur.execute("CREATE TABLE IF NOT EXISTS version(version TEXT)")
 
 
@@ -232,11 +236,13 @@ def set_version(version: str) -> None:
     cur.execute("DELETE FROM version")
     cur.execute("INSERT INTO version (version) VALUES (:version)", {"version": version})
 
+
 def get_row_count(table: str) -> int:
     """Get the number of rows in a table."""
     cur = create_cursor()
     cur.execute("SELECT count(*) FROM :table", {"table": table})
     return cur.fetchone()[0]
+
 
 def get_files_count() -> int:
     """Get the number of files in the DB."""
@@ -259,18 +265,6 @@ def get_hash_id_from_hash(video_hash: str) -> str | None:
     """Get the hash_id from the video hash. Return None if it's not found."""
     cur = create_cursor()
     cur.execute("SELECT hash_id FROM files WHERE hash = :hash;", {"hash": video_hash})
-    res = cur.fetchone()
-    if res is None or (len(res) == 0):
-        return None
-    return res[0]
-
-
-def get_farthest_search_cache_index(hash_id: int) -> int | None:
-    """Get the farthest search cache index for a file. Return None if it's not found."""
-    cur = create_cursor()
-    cur.execute(
-        "SELECT farthest_search_index FROM farthest_search_cache WHERE hash_id = :hash_id;", {"hash_id": hash_id}
-    )
     res = cur.fetchone()
     if res is None or (len(res) == 0):
         return None
