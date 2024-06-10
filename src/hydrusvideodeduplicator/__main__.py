@@ -69,6 +69,7 @@ def main(
 
     DedupeDB.connect_to_db()
     DedupeDB.create_tables()
+    DedupeDB.set_version(__version__)
 
     """
     # TODO

@@ -232,6 +232,15 @@ def create_tables() -> None:
     cur.execute(
         "CREATE TABLE IF NOT EXISTS farthest_search_cache(hash_id INTEGER PRIMARY KEY, farthest_search_index INTEGER)"
     )
+    cur.execute("CREATE TABLE IF NOT EXISTS version(version TEXT)")
+
+
+def set_version(version: str) -> None:
+    """Set the version in the database."""
+    cur = create_cursor()
+    cur.execute("DROP TABLE IF EXISTS version")
+    cur.execute("CREATE TABLE version(version TEXT)")
+    cur.execute("INSERT INTO version (version) VALUES (:version)", {"version": version})
 
 
 def get_files_count() -> int:
