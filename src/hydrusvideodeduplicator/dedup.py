@@ -97,7 +97,7 @@ class HydrusVideoDeduplicator:
             return None
         else:
             assert phash_str and phash_str != "[]"
-            PHashedVideo = namedtuple("PHashedVideo", "video_hash perceptual_hash")
+            PHashedVideo = namedtuple("PHashedVideo", ["video_hash", "perceptual_hash"])
             return PHashedVideo(video_hash, phash_str)
 
     def add_perceptual_hashes_to_db(self, overwrite: bool, video_hashes: Sequence[str]) -> None:
@@ -112,13 +112,14 @@ class HydrusVideoDeduplicator:
         new_video_hashes = []
         if overwrite:
             new_video_hashes = video_hashes
-            print(f"[yellow] Overwriting {len(video_hashes)} existing hashes.")
+            print(f"[yellow] Overwriting {DedupeDB.get_row_count('perceptual_hash_map')} existing hashes.")
         else:
             # Filter existing hashes
             for video_hash in video_hashes:
                 # Get the hash_id from the video hash (if it exists).
                 hash_id = DedupeDB.get_hash_id_from_hash(video_hash)
-                # If the file isn't in files, then we want to hash it, because it won't be in perceptual_hash_map either.
+                # If the file isn't in files, then we want to hash it,
+                # because it won't be in perceptual_hash_map either.
                 if not hash_id:
                     new_video_hashes.append(video_hash)
                 else:
@@ -133,52 +134,50 @@ class HydrusVideoDeduplicator:
                     if res is None or (len(res) == 0):
                         new_video_hashes.append(video_hash)
 
-            print(f"[blue] Found {len(new_video_hashes)} videos to process")
+        print(f"[blue] Found {len(new_video_hashes)} videos to process")
 
-            videos_phashed_count = 0
-            try:
-                self.hydlog.info("Starting perceptual hash processing")
+        videos_phashed_count = 0
+        try:
+            self.hydlog.info("Starting perceptual hash processing")
 
-                with tqdm(total=len(new_video_hashes), dynamic_ncols=True, unit="video", colour="BLUE") as pbar:
-                    for video_hash in new_video_hashes:
-                        result = self.fetch_and_hash_file(video_hash)
-                        if result is None:
-                            continue
-                        video_hash, perceptual_hash = result
+            with tqdm(total=len(new_video_hashes), dynamic_ncols=True, unit="video", colour="BLUE") as pbar:
+                for video_hash in new_video_hashes:
+                    result = self.fetch_and_hash_file(video_hash)
+                    if result is None:
+                        continue
+                    video_hash, perceptual_hash = result
 
-                        # TODO: Both of these inserts should be in a single transaction.
+                    # TODO: These inserts should be in a single transaction.
 
-                        # Insert the file into the files table.
-                        cur.execute(
-                            "INSERT OR IGNORE INTO files (hash) VALUES (:hash);",
-                            {"hash": video_hash},
-                        )
+                    # Insert the file into the files table.
+                    cur.execute(
+                        "INSERT OR IGNORE INTO files (hash) VALUES (:hash);",
+                        {"hash": video_hash},
+                    )
 
-                        # Insert the phash into the perceptual_hashes table.
-                        # If it already exists, there's nothing to do, so ignore.
-                        # It's possible to already exist if two files have the same perceptual hash.
-                        cur.execute(
-                            "INSERT OR IGNORE INTO perceptual_hashes (phash) VALUES (:phash);",
-                            {"phash": perceptual_hash},
-                        )
+                    # Insert the phash into the perceptual_hashes table.
+                    # If it already exists, there's nothing to do, so ignore.
+                    # It's possible to already exist if two files have the same perceptual hash.
+                    cur.execute(
+                        "INSERT OR IGNORE INTO perceptual_hashes (phash) VALUES (:phash);",
+                        {"phash": perceptual_hash},
+                    )
 
-                        # Get the hash_id from the video hash.
-                        hash_id = DedupeDB.get_hash_id_from_hash(video_hash)
+                    hash_id = DedupeDB.get_hash_id_from_hash(video_hash)
+                    DedupeDB.associate_perceptual_hash(hash_id, perceptual_hash)
 
-                        DedupeDB.associate_perceptual_hash(hash_id, perceptual_hash)
+                    videos_phashed_count += 1
+                    DedupeDB.get_connection().commit()
+                    pbar.update(1)
 
-                        videos_phashed_count += 1
-                        DedupeDB.get_connection().commit()
-                        pbar.update(1)
+        except KeyboardInterrupt:
+            print("[yellow] Perceptual hash processing was interrupted!")
 
-            except KeyboardInterrupt:
-                print("[yellow] Perceptual hash processing was interrupted!")
+        else:
+            print("[green] Finished perceptual hash processing.")
 
-            else:
-                print("[green] Finished perceptual hash processing.")
-
-            finally:
-                print(f"[green] Added {videos_phashed_count} new videos to the database.")
+        finally:
+            print(f"[green] Added {videos_phashed_count} new videos to the database.")
 
     def compare_videos(self, video1_hash: str, video2_hash: str, video1_phash: str, video2_phash: str) -> None:
         """Compare videos and mark them as potential duplicates in Hydrus if they are similar."""

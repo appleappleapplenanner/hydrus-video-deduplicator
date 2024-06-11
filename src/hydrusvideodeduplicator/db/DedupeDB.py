@@ -246,7 +246,10 @@ def set_version(version: str) -> None:
 def get_row_count(table: str) -> int:
     """Get the number of rows in a table."""
     cur = create_cursor()
-    cur.execute("SELECT count(*) FROM :table", {"table": table})
+    # Please don't SQL inject this. You can't use named parameters for table.
+    if not table.isascii():
+        raise ValueError
+    cur.execute(f"SELECT count(*) FROM {table}")
     return cur.fetchone()[0]
 
 
@@ -319,9 +322,14 @@ def associate_perceptual_hash(hash_id: int, perceptual_hash) -> None:
     """Associate a hash_id with a perceptual_hash in the perceptual_hash_map."""
     phash_id = get_phash_id_from_phash(perceptual_hash)
     cur = create_cursor()
-    # TODO: Update the phash_id if there's a collision.
+    # phash_id is updated if there's a collision. A collision will happen if dedupe is set to overwrite.
+    # This may leave a dangling perceptual hash, but cleaning them up later is possible since it is
+    # possible to check if anything points to it.
     cur.execute(
-        "INSERT INTO perceptual_hash_map (phash_id, hash_id) VALUES (:phash_id, :hash_id);",
+        """
+        INSERT INTO perceptual_hash_map (phash_id, hash_id) VALUES (:phash_id, :hash_id)
+        ON CONFLICT (phash_id, hash_id) DO UPDATE SET phash_id = :phash_id;
+        """,
         {"phash_id": phash_id, "hash_id": hash_id},
     )
     cur.execute("SELECT phash_id, hash_id FROM perceptual_hash_map;")
