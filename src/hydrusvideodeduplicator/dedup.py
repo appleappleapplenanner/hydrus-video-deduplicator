@@ -109,29 +109,27 @@ class HydrusVideoDeduplicator:
 
         cur = DedupeDB.create_cursor()
 
-        dblen = DedupeDB.get_files_count()
-
         new_video_hashes = []
         if overwrite:
             new_video_hashes = video_hashes
-            print(f"[yellow] Overwriting {dblen} existing hashes.")
+            print(f"[yellow] Overwriting {len(video_hashes)} existing hashes.")
         else:
             # Filter existing hashes
             for video_hash in video_hashes:
                 # Get the hash_id from the video hash (if it exists).
                 hash_id = DedupeDB.get_hash_id_from_hash(video_hash)
-                # If the file isn't in files, then we want to hash it, because it won't be in perceptual_hashes either.
+                # If the file isn't in files, then we want to hash it, because it won't be in perceptual_hash_map either.
                 if not hash_id:
                     new_video_hashes.append(video_hash)
                 else:
+                    # If the file isn't in perceptual_hash_map, then we want to hash it.
                     res = cur.execute(
                         """
-                        SELECT hash_id FROM perceptual_hashes
-                        WHERE hash_id = :hash_id;
+                        SELECT phash_id FROM perceptual_hashes
+                        WHERE (SELECT phash_id FROM perceptual_hash_map WHERE hash_id = :hash_id);
                         """,
                         {"hash_id": hash_id},
                     ).fetchone()
-                    # If the file isn't in perceptual_hashes, then we want to hash it.
                     if res is None or (len(res) == 0):
                         new_video_hashes.append(video_hash)
 
@@ -152,20 +150,25 @@ class HydrusVideoDeduplicator:
 
                         # Insert the file into the files table.
                         cur.execute(
-                            "INSERT OR IGNORE INTO files (hash_id, hash) VALUES (:hash_id, :hash);",
-                            {"hash_id": None, "hash": video_hash},
+                            "INSERT OR IGNORE INTO files (hash) VALUES (:hash);",
+                            {"hash": video_hash},
+                        )
+
+                        # Insert the phash into the perceptual_hashes table.
+                        # If it already exists, there's nothing to do, so ignore.
+                        # It's possible to already exist if two files have the same perceptual hash.
+                        cur.execute(
+                            "INSERT OR IGNORE INTO perceptual_hashes (phash) VALUES (:phash);",
+                            {"phash": perceptual_hash},
                         )
 
                         # Get the hash_id from the video hash.
                         hash_id = DedupeDB.get_hash_id_from_hash(video_hash)
 
-                        # Insert hash and perceptual hash into the hpash table.
-                        cur.execute(
-                            "INSERT INTO perceptual_hashes (hash_id, phash) VALUES (:hash_id, :phash);",
-                            {"hash_id": hash_id, "phash": perceptual_hash},
-                        )
+                        DedupeDB.associate_perceptual_hash(hash_id, perceptual_hash)
 
                         videos_phashed_count += 1
+                        DedupeDB.get_connection().commit()
                         pbar.update(1)
 
             except KeyboardInterrupt:
@@ -175,7 +178,6 @@ class HydrusVideoDeduplicator:
                 print("[green] Finished perceptual hash processing.")
 
             finally:
-                DedupeDB.get_connection().commit()
                 print(f"[green] Added {videos_phashed_count} new videos to the database.")
 
     def compare_videos(self, video1_hash: str, video2_hash: str, video1_phash: str, video2_phash: str) -> None:
@@ -214,7 +216,7 @@ class HydrusVideoDeduplicator:
         cur = DedupeDB.create_cursor()
         cur.execute(
             """
-            SELECT count(hash_id) FROM perceptual_hashes
+            SELECT count(hash_id) FROM perceptual_hash_map
             WHERE hash_id NOT IN deleted_files
             """
         )
@@ -230,34 +232,36 @@ class HydrusVideoDeduplicator:
             ) as pbar:
                 cur.execute(
                     """
-                    SELECT hash_id, phash FROM perceptual_hashes
+                    SELECT phash_id, hash_id FROM perceptual_hash_map
                     WHERE hash_id NOT IN deleted_files
                     ORDER BY hash_id ASC;
                     """
                 )
                 while (row := cur.fetchone()) is not None:
-                    hash_id, phash = row
+                    phash_id, hash_id = row
                     pbar.update(1)
 
                     cur_b = DedupeDB.create_cursor()
                     # Avoid O(n^2) comparisons. Just compare to the ones not already compared to.
                     cur_b.execute(
                         """
-                        SELECT hash_id, phash FROM perceptual_hashes
+                        SELECT phash_id, hash_id FROM perceptual_hash_map
                         WHERE hash_id > :hash_id AND hash_id NOT IN deleted_files
                         ORDER BY hash_id ASC;
                         """,
                         {"hash_id": hash_id},
                     )
                     while (row_b := cur_b.fetchone()) is not None:
-                        hash_id_b, phash_b = row_b
+                        phash_id_b, hash_id_b = row_b
 
                         # Don't compare to self
                         if hash_id != hash_id_b:
                             hash_a = DedupeDB.get_hash_from_hash_id(hash_id)
                             hash_b = DedupeDB.get_hash_from_hash_id(hash_id_b)
+                            phash_a = DedupeDB.get_phash_from_phash_id(phash_id)
+                            phash_b = DedupeDB.get_phash_from_phash_id(phash_id_b)
 
-                            self.compare_videos(hash_a, hash_b, phash, phash_b)
+                            self.compare_videos(hash_a, hash_b, phash_a, phash_b)
 
                         # TODO: Should this be committed less frequently?
                         DedupeDB.get_connection().commit()

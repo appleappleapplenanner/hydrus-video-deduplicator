@@ -225,7 +225,13 @@ def create_tables() -> None:
     # hash_id is the video id.
     # This table is the comparable to the old videos table where hash is the key column
     cur.execute("CREATE TABLE IF NOT EXISTS files(hash_id INTEGER PRIMARY KEY, hash BLOB_BYTES UNIQUE)")
-    cur.execute("CREATE TABLE IF NOT EXISTS perceptual_hashes(hash_id INTEGER PRIMARY KEY, phash BLOB_BYTES)")
+    cur.execute("CREATE TABLE IF NOT EXISTS perceptual_hashes(phash_id INTEGER PRIMARY KEY, phash BLOB_BYTES UNIQUE)")
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS
+        perceptual_hash_map(phash_id INTEGER, hash_id INTEGER, PRIMARY KEY (phash_id, hash_id))
+        """
+    )
     cur.execute("CREATE TABLE IF NOT EXISTS deleted_files(hash_id INTEGER PRIMARY KEY)")
     cur.execute("CREATE TABLE IF NOT EXISTS version(version TEXT)")
 
@@ -252,7 +258,7 @@ def get_files_count() -> int:
 
 
 def get_hash_from_hash_id(hash_id: int) -> int | None:
-    """Get the hash from the hash id. Return None if it's not found."""
+    """Get the hash from the hash_id. Return None if it's not found."""
     cur = create_cursor()
     cur.execute("SELECT hash FROM files WHERE hash_id = :hash_id;", {"hash_id": hash_id})
     res = cur.fetchone()
@@ -269,3 +275,62 @@ def get_hash_id_from_hash(video_hash: str) -> str | None:
     if res is None or (len(res) == 0):
         return None
     return res[0]
+
+
+def get_phash_from_phash_id(phash_id: int) -> str | None:
+    """Get the perceptual hash from the phash_id. Return None if it's not found."""
+    cur = create_cursor()
+    cur.execute("SELECT phash FROM perceptual_hashes WHERE phash_id = :phash_id;", {"phash_id": phash_id})
+    res = cur.fetchone()
+    if res is None or (len(res) == 0):
+        return None
+    return res[0]
+
+
+def get_phash_from_hash_id(hash_id: int) -> str | None:
+    """Get the perceptual hash from the hash_id. Return None if it's not found."""
+    hash_id = get_phash_id_from_hash_id(hash_id)
+    if hash_id is None:
+        return None
+    return get_phash_from_phash_id(hash_id)
+
+
+def get_phash_id_from_hash_id(hash_id: int) -> int | None:
+    """Get the phash_id from the hash_id. Return None if not found."""
+    cur = create_cursor()
+    cur.execute("SELECT phash_id FROM perceptual_hash_map WHERE hash_id = :hash_id;", {"hash_id": hash_id})
+    res = cur.fetchone()
+    if res is None or (len(res) == 0):
+        return None
+    return res[0]
+
+
+def get_phash_id_from_phash(perceptual_hash) -> int | None:
+    """Get the phash_id from the perceptual_hash. Return None if not found."""
+    cur = create_cursor()
+    cur.execute("SELECT phash_id FROM perceptual_hashes WHERE phash = :phash;", {"phash": perceptual_hash})
+    res = cur.fetchone()
+    if res is None or (len(res) == 0):
+        return None
+    return res[0]
+
+
+def associate_perceptual_hash(hash_id: int, perceptual_hash) -> None:
+    """Associate a hash_id with a perceptual_hash in the perceptual_hash_map."""
+    phash_id = get_phash_id_from_phash(perceptual_hash)
+    cur = create_cursor()
+    # TODO: Update the phash_id if there's a collision.
+    cur.execute(
+        "INSERT INTO perceptual_hash_map (phash_id, hash_id) VALUES (:phash_id, :hash_id);",
+        {"phash_id": phash_id, "hash_id": hash_id},
+    )
+    cur.execute("SELECT phash_id, hash_id FROM perceptual_hash_map;")
+
+
+def disassociate_perceptual_hash(hash_id: int, phash_id: int) -> None:
+    """Disassociate a hash_id and phash_id in the perceptual_hash_map."""
+    cur = create_cursor()
+    cur.execute(
+        "DELETE FROM perceptual_hash_map WHERE hash_id = :hash_id AND phash_id = :phash_id;",
+        {"hash_id": hash_id, "phash_id": phash_id},
+    )

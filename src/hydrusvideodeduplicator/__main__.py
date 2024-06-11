@@ -179,3 +179,5 @@ try:
     typer.run(main)
 except KeyboardInterrupt as exc:
     raise typer.Exit(-1) from exc
+finally:
+    DedupeDB.get_connection().close()
