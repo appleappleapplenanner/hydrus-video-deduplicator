@@ -67,9 +67,9 @@ class HydrusVideoDeduplicator:
         # Add perceptual hashes to video files
         # system:filetype tags are really inconsistent
         search_tags = [
-            'system:filetype=video, gif, apng',
-            'system:has duration',
-            'system:file service is not currently in trash',
+            "system:filetype=video, gif, apng",
+            "system:has duration",
+            "system:file service is not currently in trash",
         ]
 
         if custom_query is not None:
@@ -85,7 +85,21 @@ class HydrusVideoDeduplicator:
             video_hashes = list(self.client.get_video_hashes(search_tags))
             self.add_perceptual_hashes_to_db(overwrite=overwrite, video_hashes=video_hashes)
 
-        self._find_potential_duplicates()
+        if not DedupeDB.is_db_accessible(verbose=True):
+            print("[red] Could not search for duplicates.")
+        else:
+            # Number of potential duplicates before adding more. Just for user info.
+            pre_dedupe_count = self.client.get_potential_duplicate_count_hydrus()
+
+            self.find_potential_duplicates()
+
+            # Statistics for user
+            post_dedupe_count = self.client.get_potential_duplicate_count_hydrus()
+            new_dedupes_count = post_dedupe_count - pre_dedupe_count
+            if new_dedupes_count > 0:
+                print(f"[green] {new_dedupes_count} new potential duplicate pairs marked for manual processing!")
+            else:
+                print("[green] No new potential duplicate pairs found.")
 
         self.hydlog.info("Deduplication done.")
 
@@ -194,6 +208,7 @@ class HydrusVideoDeduplicator:
 
     def compare_videos(self, video1_hash: str, video2_hash: str, video1_phash: str, video2_phash: str) -> None:
         """Compare videos and mark them as potential duplicates in Hydrus if they are similar."""
+        assert video1_hash != video2_hash
         hash_a = decode_phash_from_str(video1_phash)
         hash_b = decode_phash_from_str(video2_phash)
         similarity = get_phash_similarity(hash_a, hash_b)
@@ -203,7 +218,7 @@ class HydrusVideoDeduplicator:
                 # Getting the file names will be VERY slow because of the API call
                 # file_names = get_file_names_hydrus(self.client.client, [video1_hash, video2_hash])
                 # self.hydlog.info(f"Duplicates filenames: {file_names}")
-                self.hydlog.info(f"\"Similar {similarity}%: {video1_hash}\" and \"{video2_hash}\"")
+                self.hydlog.info(f'"Similar {similarity}%: {video1_hash}" and "{video2_hash}"')
 
             self.mark_videos_as_duplicates(video1_hash, video2_hash)
 
@@ -218,18 +233,13 @@ class HydrusVideoDeduplicator:
 
         self.client.client.set_file_relationships([new_relationship])
 
-    def _find_potential_duplicates(
+    def find_potential_duplicates(
         self,
     ) -> None:
         """Find potential duplicates in the database and mark them in Hydrus."""
-        if not DedupeDB.is_db_accessible(verbose=True):
-            print("[red] Could not search for duplicates.")
+        if not DedupeDB.is_db_accessible():
             return
 
-        # Number of potential duplicates before adding more. Just for user info.
-        pre_dedupe_count = self.client.get_potential_duplicate_count_hydrus()
-
-        video_counter = 0
         with SqliteDict(
             str(DedupeDB.get_db_file_path()), tablename="videos", flag="c", autocommit=True, outer_stack=False
         ) as hashdb:
@@ -244,7 +254,6 @@ class HydrusVideoDeduplicator:
                     with Parallel(n_jobs=self.job_count) as parallel:
                         for i, video1_hash in enumerate(hashdb):
                             current_hash = video1_hash
-                            video_counter += 1
                             pbar.update(1)
 
                             row = hashdb[video1_hash]
@@ -283,11 +292,3 @@ class HydrusVideoDeduplicator:
                     row = hashdb[current_hash]
                     row["farthest_search_index"] = total
                     hashdb[current_hash] = row
-
-        # Statistics for user
-        post_dedupe_count = self.client.get_potential_duplicate_count_hydrus()
-        new_dedupes_count = post_dedupe_count - pre_dedupe_count
-        if new_dedupes_count > 0:
-            print(f"[green] {new_dedupes_count} new potential duplicates marked for processing!")
-        else:
-            print("[green] No new potential duplicates found.")
