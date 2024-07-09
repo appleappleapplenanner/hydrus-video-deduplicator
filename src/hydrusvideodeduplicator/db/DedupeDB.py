@@ -55,7 +55,7 @@ def clear_search_cache() -> None:
     if not is_db_accessible():
         return
 
-    with SqliteDict(str(DEDUP_DATABASE_FILE), tablename="videos", flag="c") as hashdb:
+    with SqliteDict(str(get_db_file_path()), tablename="videos", flag="c") as hashdb:
         for key in hashdb:
             row = hashdb[key]
             if "farthest_search_index" in row:
@@ -75,14 +75,14 @@ def update_search_cache(new_total: int | None = None) -> None:
         return
 
     BATCH_SIZE = 256
-    with SqliteDict(str(DEDUP_DATABASE_FILE), tablename="videos", flag="c", outer_stack=False) as hashdb:
+    with SqliteDict(str(get_db_file_path()), tablename="videos", flag="c", outer_stack=False) as hashdb:
         if new_total is None:
             new_total = len(hashdb)
         for batched_items in batched_and_save_db(hashdb, BATCH_SIZE):
             for video_hash, _ in batched_items.items():
                 row = hashdb[video_hash]
-                if 'farthest_search_index' in row and row['farthest_search_index'] > new_total:
-                    row['farthest_search_index'] = new_total
+                if "farthest_search_index" in row and row["farthest_search_index"] > new_total:
+                    row["farthest_search_index"] = new_total
                     hashdb[video_hash] = row
 
 
@@ -137,7 +137,7 @@ def clear_trashed_files_from_db(client: HVDClient) -> None:
         return
 
     try:
-        with SqliteDict(str(DEDUP_DATABASE_FILE), tablename="videos", flag="c", outer_stack=False) as hashdb:
+        with SqliteDict(str(get_db_file_path()), tablename="videos", flag="c", outer_stack=False) as hashdb:
             # This is EXPENSIVE. sqlitedict gets len by iterating over the entire database!
             if (total := len(hashdb)) < 1:
                 return
@@ -171,6 +171,17 @@ def clear_trashed_files_from_db(client: HVDClient) -> None:
 
     except OSError as exc:
         dedupedblog.info(exc)
+
+
+def populate_video_ids() -> None:
+    """Add unique id to videos id table from all videos in the videos table."""
+    with SqliteDict(str(get_db_file_path()), tablename="video_id", flag="c", outer_stack=False) as video_id_table:
+        with SqliteDict(str(get_db_file_path()), tablename="videos", flag="r", outer_stack=False) as videos_table:
+            for i, video_hash in enumerate(videos_table):
+                if video_hash not in video_id_table:
+                    video_id_table[video_hash] = i
+
+        video_id_table.commit()
 
 
 def create_db_dir() -> None:

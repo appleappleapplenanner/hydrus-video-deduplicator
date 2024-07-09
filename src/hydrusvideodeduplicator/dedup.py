@@ -91,6 +91,7 @@ class HydrusVideoDeduplicator:
             # Number of potential duplicates before adding more. Just for user info.
             pre_dedupe_count = self.client.get_potential_duplicate_count_hydrus()
 
+            DedupeDB.populate_video_ids()
             self.find_potential_duplicates()
 
             # Statistics for user
@@ -208,7 +209,6 @@ class HydrusVideoDeduplicator:
 
     def compare_videos(self, video1_hash: str, video2_hash: str, video1_phash: str, video2_phash: str) -> None:
         """Compare videos and mark them as potential duplicates in Hydrus if they are similar."""
-        assert video1_hash != video2_hash
         hash_a = decode_phash_from_str(video1_phash)
         hash_b = decode_phash_from_str(video2_phash)
         similarity = get_phash_similarity(hash_a, hash_b)
@@ -237,58 +237,61 @@ class HydrusVideoDeduplicator:
         self,
     ) -> None:
         """Find potential duplicates in the database and mark them in Hydrus."""
-        if not DedupeDB.is_db_accessible():
-            return
-
         with SqliteDict(
-            str(DedupeDB.get_db_file_path()), tablename="videos", flag="c", autocommit=True, outer_stack=False
-        ) as hashdb:
-            current_hash = None
-            try:
-                total = len(hashdb)
+            str(DedupeDB.get_db_file_path()), tablename="video_id", flag="r", outer_stack=False
+        ) as video_id_table:
+            with SqliteDict(
+                str(DedupeDB.get_db_file_path()), tablename="videos", flag="c", autocommit=True, outer_stack=False
+            ) as hashdb:
+                current_hash = None
+                try:
+                    total = len(hashdb)
 
-                with tqdm(
-                    dynamic_ncols=True, total=total, desc="Finding duplicates", unit="video", colour="BLUE"
-                ) as pbar:
-                    # -1 is all cores, -2 is all cores but one
-                    with Parallel(n_jobs=self.job_count) as parallel:
-                        for i, video1_hash in enumerate(hashdb):
-                            current_hash = video1_hash
-                            pbar.update(1)
+                    with tqdm(
+                        dynamic_ncols=True, total=total, desc="Finding duplicates", unit="video", colour="BLUE"
+                    ) as pbar:
+                        # -1 is all cores, -2 is all cores but one
+                        with Parallel(n_jobs=self.job_count) as parallel:
+                            for i, video1_hash in enumerate(video_id_table):
+                                current_hash = video1_hash
+                                pbar.update(1)
 
-                            row = hashdb[video1_hash]
+                                row = hashdb[video1_hash]
 
-                            # Store last furthest searched position in the database for each element
-                            # This way you only have to start searching at that place instead of at i+1 if it exists
-                            farthest_search_index = row.setdefault("farthest_search_index", i + 1)
+                                # Store last furthest searched position in the database for each element
+                                # This way you only have to start searching at that place instead of at i+1 if it exists
+                                farthest_search_index = i
+                                if "farthest_search_index" in row:
+                                    farthest_search_index = row["farthest_search_index"]
 
-                            assert farthest_search_index <= total
-                            if farthest_search_index == total:
-                                # This file has already been searched for dupes against all other videos in the DB
-                                continue
+                                assert farthest_search_index <= total
+                                if farthest_search_index == total:
+                                    # This file has already been searched for dupes against all other videos in the DB
+                                    continue
 
-                            parallel(
-                                delayed(self.compare_videos)(
-                                    video1_hash,
-                                    video2_hash,
-                                    row["perceptual_hash"],
-                                    hashdb[video2_hash]["perceptual_hash"],
+                                parallel(
+                                    delayed(self.compare_videos)(
+                                        video1_hash,
+                                        video2_hash,
+                                        row["perceptual_hash"],
+                                        hashdb[video2_hash]["perceptual_hash"],
+                                    )
+                                    for video2_hash in islice(video_id_table, farthest_search_index + 1, None)
                                 )
-                                for video2_hash in islice(hashdb, row["farthest_search_index"], None)
-                            )
 
-                            # Video has now been compared against all other videos for dupes,
-                            # so update farthest_search_index to the current length of the table
-                            row["farthest_search_index"] = total
-                            hashdb[video1_hash] = row
+                                # Video has now been compared against all other videos for dupes,
+                                # so update farthest_search_index to the current length of the table
+                                row["farthest_search_index"] = total
+                                hashdb[video1_hash] = row
 
-            except KeyboardInterrupt:
-                print("[yellow] Duplicate search was interrupted!")
-            else:
-                # current_hash can be None if Hydrus DB has no files...
-                if current_hash is not None:
-                    # Set the last element farthest_search_index to the end of the
-                    # table since it won't get hashed because of the islice optimization
-                    row = hashdb[current_hash]
-                    row["farthest_search_index"] = total
-                    hashdb[current_hash] = row
+                except KeyboardInterrupt:
+                    print("[yellow] Duplicate search was interrupted!")
+                else:
+                    # current_hash can be None if Hydrus DB has no files...
+                    if current_hash is not None:
+                        # TODO: Do we still need this? I don't think so.
+                        # Set the last element farthest_search_index to the end of the
+                        # table since it won't get hashed because of the islice optimization
+                        row = hashdb[current_hash]
+                        row["farthest_search_index"] = total
+                        hashdb[current_hash] = row

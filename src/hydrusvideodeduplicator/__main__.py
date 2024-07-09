@@ -11,12 +11,12 @@ import hydrusvideodeduplicator.hydrus_api as hydrus_api
 from .__about__ import __version__
 from .client import HVDClient
 from .config import (
+    FAILED_PAGE_NAME,
     HYDRUS_API_KEY,
     HYDRUS_API_URL,
     HYDRUS_LOCAL_FILE_SERVICE_KEYS,
     HYDRUS_QUERY,
     REQUESTS_CA_BUNDLE,
-    FAILED_PAGE_NAME,
 )
 from .db import DedupeDB
 from .dedup import HydrusVideoDeduplicator
@@ -72,7 +72,7 @@ def main(
         loglevel = logging.DEBUG
         verbose = True
 
-    logging.basicConfig(format=' %(asctime)s - %(name)s: %(message)s', datefmt='%H:%M:%S', level=loglevel)
+    logging.basicConfig(format=" %(asctime)s - %(name)s: %(message)s", datefmt="%H:%M:%S", level=loglevel)
 
     # Verbose sets whether logs are shown to the user at all.
     # Logs are separate from printing in this program.
