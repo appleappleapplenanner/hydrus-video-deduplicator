@@ -32,7 +32,12 @@ dependencies = [
     # Below is for vpdqpy
     "pillow",
     "pyav<12",
+    "hvdaccelerators @ git+https://github.com/hydrusvideodeduplicator/hvdaccelerators.git",
 ]
+
+# pypi doesn't allow this, so need to remove and upload hvdaccelerators to pypi before release.
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [project.urls]
 Documentation = "https://github.com/hydrusvideodeduplicator/hydrus-video-deduplicator#readme"

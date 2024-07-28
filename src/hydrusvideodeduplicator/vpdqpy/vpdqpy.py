@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import av
+from hvdaccelerators import stuff
 from PIL import Image
 
-from ..pdqhashing.hasher.pdq_hasher import PDQHasher
 from ..pdqhashing.pdq_types.hash256 import Hash256
 
 if TYPE_CHECKING:
@@ -161,14 +161,33 @@ class Vpdq:
         if video is None:
             raise ValueError
 
-        pdq = PDQHasher()
+        # pdq = PDQHasher()
         features: VpdqHash = []
 
+        hasher = None
         for second, frame in enumerate(Vpdq.frame_extract_pyav(video)):
-            pdq_hash_and_quality = pdq.fromBufferedImage(frame.to_image())
-            pdq_frame = VpdqFeature(pdq_hash_and_quality.getHash(), pdq_hash_and_quality.getQuality(), second)
-            features.append(pdq_frame)
-
+            # TODO: This uses SO MUCH memory is hashing gets behind decoding since there will be
+            #       lots of raw frames in the queue which are HUGE. Add a max size for the queue.
+            #       ... or I have a memory leak :(
+            im = frame.to_image()
+            im.thumbnail((512, 512))
+            if not hasher:
+                # TODO: Fix this to get the average fps from frame_extract_pyav or a new method.
+                #       Although this doesn't appear to actually do anything. Exact hashing tests pass...
+                average_fps = 1
+                hasher = stuff.Hasher(average_fps, im.width, im.height)
+            rgb_image = im.convert("RGB")
+            # result = stuff.hash_frame(rgb_image.tobytes(), im.width, im.height)
+            hasher.hash_frame(rgb_image.tobytes())
+            # (pdq_hash, pdq_quality) = result
+            # pdq_hash = str(pdq_hash, encoding="utf-8")
+            # pdq_frame = VpdqFeature(Hash256.fromHexString(pdq_hash), pdq_quality, second)
+            # features.append(pdq_frame)
+        features = hasher.finish()
+        features = [
+            VpdqFeature(Hash256.fromHexString(feature.get_hash()), feature.get_quality(), feature.get_frame_number())
+            for feature in features
+        ]
         deduped_features = Vpdq.dedupe_features(features)
         return deduped_features
 
