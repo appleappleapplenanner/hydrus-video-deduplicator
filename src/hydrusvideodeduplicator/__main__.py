@@ -36,7 +36,6 @@ Parameters:
 - verbose turns on logging
 - debug turns on logging and sets the logging level to debug
 """
-print(f"[blue] Hydrus Video Deduplicator {__version__} [/]")
 
 
 def main(
@@ -202,14 +201,19 @@ def main(
         raise typer.Exit(code=1)
     HydrusVideoDeduplicator.threshold = threshold
 
-    deduper.deduplicate(
+    num_similar_pairs = deduper.deduplicate(
         skip_hashing=skip_hashing,
     )
 
-    raise typer.Exit()
+    db.close()
+
+    return num_similar_pairs
 
 
-try:
-    typer.run(main)
-except KeyboardInterrupt as exc:
-    raise typer.Exit(-1) from exc
+if __name__ == "__main__":
+    print(f"[blue] Hydrus Video Deduplicator {__version__} [/]")
+    try:
+        typer.run(main)
+        raise typer.Exit()
+    except KeyboardInterrupt as exc:
+        raise typer.Exit(-1) from exc

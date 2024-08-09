@@ -82,12 +82,14 @@ gh-deploy = "mkdocs gh-deploy --force --strict --config-file mkdocs-gh-pages.yml
 [tool.hatch.envs.test]
 dependencies = [
     "pytest",
+    "vcrpy", # for replaying saved api requests/responses
 ]
 
 [tool.hatch.envs.test.scripts]
-all = "python -m pytest tests/test_db.py src/hydrusvideodeduplicator/pdqhashing/tests tests/test_dedupe.py tests/test_vpdqpy.py --verbose {args}"
+all = "python -m pytest tests/test_db.py src/hydrusvideodeduplicator/pdqhashing/tests tests/test_dedupe.py tests/test_vpdqpy.py tests/test_main_vcr.py --verbose {args}"
 pdq = "python -m pytest src/hydrusvideodeduplicator/pdqhashing/tests --verbose {args}"
 db = "python -m pytest tests/test_db.py --verbose {args}"
+vcr = "python -m pytest tests/test_main_vcr.py --verbose {args}"
 
 # Format environment
 

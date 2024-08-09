@@ -165,7 +165,7 @@ class HydrusVideoDeduplicator:
     def deduplicate(
         self,
         skip_hashing: bool,
-    ) -> None:
+    ) -> int:
         """
         Run all deduplicate functions.
 
@@ -174,7 +174,10 @@ class HydrusVideoDeduplicator:
         2. Insert the perceptual hashes into the vptree
         3. Search for similar videos in the vptree.
         4. Mark the similar videos as potential duplicates in Hydrus.
+
+        Returns the number of similar pairs found during searching.
         """
+        num_similar_pairs = 0
 
         if skip_hashing:
             print("[yellow] Skipping perceptual hashing")
@@ -243,7 +246,7 @@ class HydrusVideoDeduplicator:
         self.db.begin_transaction()
         with self.db.conn:
             try:
-                self.find_potential_duplicates()
+                num_similar_pairs = self.find_potential_duplicates()
             except KeyboardInterrupt:
                 print("[yellow] Searching for duplicates was interrupted! Progress was saved.")
 
@@ -255,7 +258,10 @@ class HydrusVideoDeduplicator:
         else:
             print("[green] No new potential duplicate pairs found.")
 
+        self.hydlog.info(f"{num_similar_pairs} similar file pairs found.")
         self.hydlog.info("Deduplication done.")
+
+        return num_similar_pairs
 
     def filter_unhashed(self, file_hashes: list[FileHash]) -> list[FileHash]:
         """
@@ -349,8 +355,12 @@ class HydrusVideoDeduplicator:
 
     def find_potential_duplicates(
         self,
-    ) -> None:
-        """Find potential duplicates in the database and mark them as such in Hydrus."""
+    ) -> int:
+        """
+        Find potential duplicates in the database and mark them as such in Hydrus.
+
+        Returns the number of similar file pairs found.
+        """
         # TODO: Should we turn the inside of this function into a generator? It might make testing super easy.
         tree = vptree.VpTreeManager(self.db)
         search_threshold = vptree.fix_vpdq_similarity((self.threshold))
@@ -361,6 +371,7 @@ class HydrusVideoDeduplicator:
             {"threshold": search_threshold},
         ).fetchall()
 
+        num_similar_pairs = 0
         with tqdm(
             dynamic_ncols=True, total=len(files), desc="Finding potential duplicates", unit="file", colour="BLUE"
         ) as pbar:
@@ -373,6 +384,7 @@ class HydrusVideoDeduplicator:
                     if hash_id != similar_hash_id:
                         # self.hydlog.info(f'Similar files found. "{file_hash_a}" and "{file_hash_b}"')
                         self.mark_videos_as_duplicates(file_hash_a, file_hash_b)
+                        num_similar_pairs += 1
 
                 # TODO:
                 # Do we need to add the below line here? See _PerceptualHashesSearchForPotentialDuplicates in Hydrus.
@@ -384,3 +396,4 @@ class HydrusVideoDeduplicator:
                 )
 
                 pbar.update(1)
+        return num_similar_pairs // 2
