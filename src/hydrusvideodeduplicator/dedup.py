@@ -20,8 +20,6 @@ from .client import HVDClient
 from .db import DedupeDB
 from .hashing import (
     compute_phash,
-    decode_phash_from_str,
-    encode_phash_to_str,
     get_phash_similarity,
 )
 from .page_logger import HydrusPageLogger
@@ -101,19 +99,15 @@ class HydrusVideoDeduplicator:
         # Calculate perceptual_hash
         try:
             phash = compute_phash(video_response.content)
-            phash_str: str = encode_phash_to_str(phash)
         except Exception as exc:
             print("[red] Failed to calculate a perceptual hash.")
             self.hydlog.exception(exc)
             self.hydlog.error(f"Errored file hash: {video_hash}")
             return FailedVideo(video_hash)
         else:
-            # "just in case" error checking
-            if phash_str is None or phash_str == "[]":
-                return FailedVideo(video_hash)
-
+            # TODO: removed some error checking here, was that required?
             PHashedVideo = namedtuple("PHashedVideo", "video_hash perceptual_hash")
-            return PHashedVideo(video_hash, phash_str)
+            return PHashedVideo(video_hash, phash)
 
     def add_perceptual_hashes_to_db(self, overwrite: bool, video_hashes: Sequence[str]) -> None:
         """
@@ -143,7 +137,7 @@ class HydrusVideoDeduplicator:
                 new_video_hashes = [
                     video_hash
                     for video_hash in video_hashes
-                    if video_hash not in hashdb or "perceptual_hash" not in hashdb[video_hash]
+                    if video_hash not in hashdb or "perceptual_hash_raw" not in hashdb[video_hash]
                 ]
 
             print(f"[blue] Found {len(new_video_hashes)} videos to process")
@@ -169,7 +163,7 @@ class HydrusVideoDeduplicator:
                             video_hash = result.video_hash
                             perceptual_hash = result.perceptual_hash
                             row = hashdb.get(video_hash, {})
-                            row["perceptual_hash"] = perceptual_hash
+                            row["perceptual_hash_raw"] = perceptual_hash
                             hashdb[video_hash] = row
 
                             success_hash_count += 1
@@ -192,10 +186,12 @@ class HydrusVideoDeduplicator:
                         )
                 print(f"[green] Added {success_hash_count} new videos to the database.")
 
-    def compare_videos(self, video1_hash: str, video2_hash: str, video1_phash: str, video2_phash: str) -> None:
+    # TODO: re-add type hints
+    def compare_videos(self, video1_hash: str, video2_hash: str, video1_phash, video2_phash) -> None:
         """Compare videos and mark them as potential duplicates in Hydrus if they are similar."""
-        hash_a = decode_phash_from_str(video1_phash)
-        hash_b = decode_phash_from_str(video2_phash)
+        # TODO: remove these assignments
+        hash_a = video1_phash
+        hash_b = video2_phash
         similarity = get_phash_similarity(hash_a, hash_b)
 
         if similarity >= self.threshold:
@@ -272,8 +268,8 @@ class HydrusVideoDeduplicator:
                                 delayed(self.compare_videos)(
                                     video1_hash,
                                     video2_hash,
-                                    row["perceptual_hash"],
-                                    videos_table[video2_hash]["perceptual_hash"],
+                                    row["perceptual_hash_raw"],
+                                    videos_table[video2_hash]["perceptual_hash_raw"],
                                 )
                                 for video2_hash in islice(video_hashes, start_index, None)
                             )

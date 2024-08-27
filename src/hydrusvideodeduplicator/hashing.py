@@ -24,26 +24,6 @@ def compute_phash(video: Path | str | bytes) -> VpdqHash:
     return phash
 
 
-def encode_phash_to_str(phash: VpdqHash) -> str:
-    """
-    Encode the perceptual hash of a video into a string.
-
-    Returns the perceptual hash encoded as a string.
-    """
-    encoded_phash = Vpdq.vpdq_to_json(phash)
-    return encoded_phash
-
-
-def decode_phash_from_str(phash_str: str) -> VpdqHash:
-    """
-    Encode the perceptual hash of a video into a string.
-
-    Returns the perceptual hash encoded as a string.
-    """
-    phash = Vpdq.json_to_vpdq(phash_str)
-    return phash
-
-
 def get_phash_similarity(
     hash_a: VpdqHash,
     hash_b: VpdqHash,
