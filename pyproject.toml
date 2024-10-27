@@ -40,6 +40,32 @@ Documentation = "https://github.com/hydrusvideodeduplicator/hydrus-video-dedupli
 Issues = "https://github.com/hydrusvideodeduplicator/hydrus-video-deduplicator/issues"
 Source = "https://github.com/hydrusvideodeduplicator/hydrus-video-deduplicator"
 
+[tool.poetry]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+platformdirs = "^4.3.6"
+rich = "^13.9.3"
+numpy = "^2.1.2"
+tqdm = "^4.66.5"
+python-dotenv = "^1.0.1"
+typer = "^0.12.5"
+requests = "^2.32.3"
+psutil = "^6.1.0"
+joblib = ">=1.4"
+pillow = "^11.0.0"
+pyav = "<12"
+
+[tool.poetry.group.test.dependencies]
+pytest = "^8.3.3"
+vcrpy = "^6.0.2"
+pytest-benchmark = "^4.0.0"
+
+[tool.poetry.group.benchmark.dependencies]
+pytest = "^8.3.3"
+pytest-benchmark = "^4.0.0"
+
 [tool.hatch.build]
 exclude = [
   "/.*",
