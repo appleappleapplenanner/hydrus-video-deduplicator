@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import logging
 import time
 from dataclasses import dataclass
@@ -182,6 +183,15 @@ class HydrusVideoDeduplicator:
         if skip_hashing:
             print("[yellow] Skipping perceptual hashing")
         else:
+            begin_time = datetime.datetime.now()
+            print(
+                f"{begin_time.isoformat(timespec='seconds')} | Requesting hashes from Hydrus (may take a bit, depending on db size and search filters)...",  # noqa: E501
+            )
+            end_time = datetime.datetime.now()
+            print(
+                f"{begin_time.isoformat(timespec='seconds')} | Done. Took {(end_time - begin_time).total_seconds()}s."
+            )
+
             video_hashes = list(self.client.get_video_hashes(self.search_tags))
             video_hashes = self.filter_unhashed(video_hashes)
             print(f"[blue] Found {len(video_hashes)} eligible files to perceptually hash.")
