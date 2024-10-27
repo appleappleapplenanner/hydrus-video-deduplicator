@@ -138,7 +138,7 @@ class Vpdq:
                 raise ValueError("Video stream not found.")
 
             video = container.streams.video[0]
-            video.thread_type = "AUTO"
+            video.thread_type = "NONE"
 
             raw_average_fps: Fraction = video.average_rate
             average_fps: int = 1
@@ -148,7 +148,9 @@ class Vpdq:
             else:
                 average_fps = round(raw_average_fps)
 
-            for index, frame in enumerate(container.decode(video)):
+            index = -1
+            for frame in container.decode(video):
+                index += 1
                 if index % average_fps == 0:
                     yield frame
 
