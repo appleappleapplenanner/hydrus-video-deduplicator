@@ -32,7 +32,7 @@ dependencies = [
     "joblib>=1.4",
     # Below is for vpdqpy
     "pillow",
-    "pyav<12",
+    "pyav<14",
 ]
 
 [project.urls]
